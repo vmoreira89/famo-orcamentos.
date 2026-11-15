@@ -42,6 +42,7 @@ export type Peca = {
   sup: "corpo" | "frente" | "costa" | "manual";
   oc: number; // nº de orlas no comprimento (0-2)
   ol: number; // nº de orlas na largura (0-2)
+  orlas?: [boolean, boolean, boolean, boolean]; // arestas com orla: comprimento frente, comprimento trás, largura esq., largura dir.
   subconjunto: string; // "" ou identificador de pré-montagem (ex.: "Gaveta 1")
   preco_m2: number | null; // placa/MDF
   preco_extra_m2: number | null; // folha ou lacagem (por face)
@@ -263,8 +264,8 @@ export function decompor(m: Movel, cat: Catalogo): Movel {
       qtd: 1,
       e,
       sup,
-      oc: 0,
-      ol: 0,
+      oc: 2,
+      ol: 2,
       subconjunto: "",
       preco_m2: base.m2,
       preco_extra_m2: sup === "costa" ? null : base.extra,
@@ -277,22 +278,22 @@ export function decompor(m: Movel, cat: Catalogo): Movel {
 
   const pecas: Peca[] = [];
   const ehAberto = m.tipo === "estante";
-  pecas.push(peca({ designacao: "Lado esquerdo", c: A, l: P, oc: 1 }));
-  pecas.push(peca({ designacao: "Lado direito", c: A, l: P, oc: 1 }));
-  pecas.push(peca({ designacao: "Fundo", c: interior, l: P, oc: 1 }));
+  pecas.push(peca({ designacao: "Lado esquerdo", c: A, l: P }));
+  pecas.push(peca({ designacao: "Lado direito", c: A, l: P }));
+  pecas.push(peca({ designacao: "Fundo", c: interior, l: P }));
   if (m.tipo === "inferior" || m.tipo === "gaveteiro") {
     pecas.push(peca({ designacao: "Travessa superior", qtd: 2, c: interior, l: 100 }));
   } else {
-    pecas.push(peca({ designacao: "Cúpula", c: interior, l: P, oc: 1 }));
+    pecas.push(peca({ designacao: "Cúpula", c: interior, l: P }));
   }
   if (!ehAberto || m.costa_e > 0) {
     pecas.push(peca({ designacao: "Costa", c: interior + 16, l: A - 2 * e + 16, e: m.costa_e, sup: "costa" }));
   }
   if (m.prateleiras > 0) {
-    pecas.push(peca({ designacao: "Prateleira", qtd: m.prateleiras, c: interior - 2, l: P - 20 - m.costa_e, oc: 1 }));
+    pecas.push(peca({ designacao: "Prateleira", qtd: m.prateleiras, c: interior - 2, l: P - 20 - m.costa_e }));
   }
   if (m.tipo === "roupeiro") {
-    pecas.push(peca({ designacao: "Divisória vertical", c: A - 2 * e, l: P - 20 - m.costa_e, oc: 1 }));
+    pecas.push(peca({ designacao: "Divisória vertical", c: A - 2 * e, l: P - 20 - m.costa_e }));
   }
 
   // Frentes: gavetas e portas
@@ -301,19 +302,19 @@ export function decompor(m: Movel, cat: Catalogo): Movel {
   const altPortas = m.portas > 0 ? A - (m.gavetas > 0 ? m.gavetas * (altGaveta + folga) : 0) - folga * 2 : 0;
   for (let g = 1; g <= m.gavetas; g++) {
     const sub = `Gaveta ${g}`;
-    pecas.push(peca({ designacao: `Frente gaveta ${g}`, c: L - 2 * folga, l: altGaveta, sup: "frente", oc: 2, ol: 2, subconjunto: sub }));
+    pecas.push(peca({ designacao: `Frente gaveta ${g}`, c: L - 2 * folga, l: altGaveta, sup: "frente", subconjunto: sub }));
     pecas.push(peca({ designacao: `Fundo gaveta ${g}`, c: interior - 30, l: P - 60, e: 16, subconjunto: sub, faces_extra: 0, preco_extra_m2: null }));
-    pecas.push(peca({ designacao: `Traseira gaveta ${g}`, c: interior - 30, l: Math.max(80, altGaveta - 60), e: 16, oc: 1, subconjunto: sub, faces_extra: 0, preco_extra_m2: null }));
+    pecas.push(peca({ designacao: `Traseira gaveta ${g}`, c: interior - 30, l: Math.max(80, altGaveta - 60), e: 16, subconjunto: sub, faces_extra: 0, preco_extra_m2: null }));
   }
   if (m.portas > 0 && m.tipo_porta !== "Correr") {
     const larg = m.portas === 1 ? L - 2 * folga : Math.floor((L - folga * (m.portas + 1)) / m.portas);
-    pecas.push(peca({ designacao: m.portas === 1 ? "Porta" : "Porta batente", qtd: m.portas, c: altPortas, l: larg, sup: "frente", oc: 2, ol: 2 }));
+    pecas.push(peca({ designacao: m.portas === 1 ? "Porta" : "Porta batente", qtd: m.portas, c: altPortas, l: larg, sup: "frente" }));
   } else if (m.portas > 0) {
     const larg = Math.floor(L / m.portas) + 30;
-    pecas.push(peca({ designacao: "Porta de correr", qtd: m.portas, c: A - 40, l: larg, sup: "frente", oc: 2, ol: 2 }));
+    pecas.push(peca({ designacao: "Porta de correr", qtd: m.portas, c: A - 40, l: larg, sup: "frente" }));
   }
   if (TIPOS_MOVEL[m.tipo].pes) {
-    pecas.push(peca({ designacao: "Rodapé", c: L, l: 100, sup: "frente", oc: 1 }));
+    pecas.push(peca({ designacao: "Rodapé", c: L, l: 100, sup: "frente" }));
   }
 
   // Ferragens
@@ -346,7 +347,7 @@ export function decompor(m: Movel, cat: Catalogo): Movel {
 
   // Operações (minutos por posto)
   const nPecas = pecas.reduce((s, p) => s + p.qtd, 0);
-  const orlaMl = pecas.reduce((s, p) => s + (p.qtd * (p.oc * p.c + p.ol * p.l)) / 1000, 0);
+  const orlaMl = pecas.reduce((s, p) => { const a = arestasOrla(p); return s + (p.qtd * ((Number(a[0]) + Number(a[1])) * p.c + (Number(a[2]) + Number(a[3])) * p.l)) / 1000; }, 0);
   const op = (posto: string, descricao: string, minutos: number): LinhaOperacao => ({
     id: uid(),
     posto,
@@ -428,9 +429,15 @@ export function codigoProduto(numeroProjecto: string | null, d: Divisao): string
 
 export type CustoMovel = { material: number; orla: number; desperdicio: number; ferragens: number; mao_obra: number; extras: number; total: number; pendentes: number; area_m2: number; orla_ml: number };
 
+/** Arestas com orla (a partir do registo explícito ou das contagens antigas). */
+export function arestasOrla(p: Peca): [boolean, boolean, boolean, boolean] {
+  return p.orlas ?? [p.oc >= 1, p.oc >= 2, p.ol >= 1, p.ol >= 2];
+}
+
 export function custoPeca(p: Peca) {
   const area = (p.qtd * p.c * p.l) / 1e6;
-  const orlaMl = (p.qtd * (p.oc * p.c + p.ol * p.l)) / 1000;
+  const ar = arestasOrla(p);
+  const orlaMl = (p.qtd * ((Number(ar[0]) + Number(ar[1])) * p.c + (Number(ar[2]) + Number(ar[3])) * p.l)) / 1000;
   const placa = p.preco_m2 == null ? null : area * p.preco_m2;
   const extra = p.faces_extra > 0 ? (p.preco_extra_m2 == null ? null : area * p.faces_extra * p.preco_extra_m2) : 0;
   const orla = orlaMl > 0 ? (p.preco_orla_ml == null ? null : orlaMl * p.preco_orla_ml) : 0;

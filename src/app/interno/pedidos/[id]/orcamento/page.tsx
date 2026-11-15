@@ -13,6 +13,7 @@ import {
   calcularTotais,
   codigoProduto,
   codigos,
+  arestasOrla,
   custoPeca,
   decompor,
   euro,
@@ -483,7 +484,7 @@ function TabelaPecas({ m, pode, onAlterar }: { m: Movel; pode: boolean; onAltera
         <thead className="border-b text-xs uppercase text-slate-500">
           <tr>
             <th className="py-1 pr-2">Código</th><th>Designação</th><th>Qtd</th><th>Comp.</th><th>Larg.</th><th>Esp.</th><th>Sup.</th>
-            <th title="Orlas no comprimento / largura">Orlas C/L</th><th>€/m²</th><th>Folha/laca €/m²</th><th>Orla €/ml</th><th className="text-right">Custo</th><th></th>
+            <th title="Clique nas arestas da peça que levam orla">Orlas</th><th>€/m²</th><th>Folha/laca €/m²</th><th>Orla €/ml</th><th className="text-right">Custo</th><th></th>
           </tr>
         </thead>
         <tbody>
@@ -498,7 +499,13 @@ function TabelaPecas({ m, pode, onAlterar }: { m: Movel; pode: boolean; onAltera
                 <td>{celula(pode, p.l, (v) => setP(p.id, "l", Number(v)), "number", "w-20")}</td>
                 <td>{celula(pode, p.e, (v) => setP(p.id, "e", Number(v)), "number", "w-14")}</td>
                 <td className="text-xs">{p.sup}</td>
-                <td className="whitespace-nowrap">{celula(pode, p.oc, (v) => setP(p.id, "oc", Math.min(2, Number(v))), "number", "w-12")} {celula(pode, p.ol, (v) => setP(p.id, "ol", Math.min(2, Number(v))), "number", "w-12")}</td>
+                <td>
+                  <SeletorOrlas
+                    p={p}
+                    pode={pode}
+                    onChange={(a) => onAlterar((x) => ({ ...x, pecas: x.pecas.map((q) => (q.id === p.id ? { ...q, orlas: a, oc: Number(a[0]) + Number(a[1]), ol: Number(a[2]) + Number(a[3]) } : q)) }))}
+                  />
+                </td>
                 <td>{celula(pode, p.preco_m2, (v) => setP(p.id, "preco_m2", numOuNull(v)), "number", "w-20", p.preco_m2 == null)}</td>
                 <td>{p.faces_extra > 0 ? celula(pode, p.preco_extra_m2, (v) => setP(p.id, "preco_extra_m2", numOuNull(v)), "number", "w-20", p.preco_extra_m2 == null) : <span className="text-slate-300">—</span>}</td>
                 <td>{celula(pode, p.preco_orla_ml, (v) => setP(p.id, "preco_orla_ml", numOuNull(v)), "number", "w-16")}</td>
@@ -512,13 +519,50 @@ function TabelaPecas({ m, pode, onAlterar }: { m: Movel; pode: boolean; onAltera
       {pode && (
         <button
           className="mt-2 text-sm font-medium text-marca hover:underline"
-          onClick={() => onAlterar((x) => ({ ...x, pecas: [...x.pecas, { id: uid(), designacao: "Nova peça", qtd: 1, c: 500, l: 300, e: 19, sup: "manual", oc: 0, ol: 0, subconjunto: "", preco_m2: null, preco_extra_m2: null, faces_extra: 0, preco_orla_ml: null, nota: "" }] }))}
+          onClick={() => onAlterar((x) => ({ ...x, pecas: [...x.pecas, { id: uid(), designacao: "Nova peça", qtd: 1, c: 500, l: 300, e: 19, sup: "manual", oc: 2, ol: 2, subconjunto: "", preco_m2: null, preco_extra_m2: null, faces_extra: 0, preco_orla_ml: null, nota: "" }] }))}
         >
           + Peça
         </button>
       )}
-      <p className="mt-1 text-xs text-slate-500">Ao custo de material e orla soma-se o desperdício definido no orçamento.</p>
+      <p className="mt-1 text-xs text-slate-500">
+        Orlas: por norma todas as peças são orladas em todo o perímetro. O rectângulo representa a peça (comprimento na horizontal); clique numa aresta para a excluir ou voltar a incluir (azul = com orla).
+        Ao custo de material e orla soma-se o desperdício definido no orçamento.
+      </p>
     </div>
+  );
+}
+
+function SeletorOrlas({ p, pode, onChange }: { p: Movel["pecas"][number]; pode: boolean; onChange: (a: [boolean, boolean, boolean, boolean]) => void }) {
+  const a = arestasOrla(p);
+  const ml = (p.qtd * ((Number(a[0]) + Number(a[1])) * p.c + (Number(a[2]) + Number(a[3])) * p.l)) / 1000;
+  const nomes = ["comprimento (frente)", "comprimento (trás)", "largura (esquerda)", "largura (direita)"];
+  const alternar = (i: number) => {
+    if (!pode) return;
+    const n = [...a] as [boolean, boolean, boolean, boolean];
+    n[i] = !n[i];
+    onChange(n);
+  };
+  const aresta = (i: number, cls: string) => (
+    <button
+      type="button"
+      disabled={!pode}
+      title={`${a[i] ? "Com" : "Sem"} orla no ${nomes[i]}${pode ? " — clique para alterar" : ""}`}
+      aria-label={`Orla no ${nomes[i]}`}
+      aria-pressed={a[i]}
+      onClick={() => alternar(i)}
+      className={`absolute ${cls} ${a[i] ? "bg-marca" : "bg-slate-200 hover:bg-slate-400"} ${pode ? "cursor-pointer" : "cursor-default"}`}
+    />
+  );
+  return (
+    <span className="flex items-center gap-2">
+      <span className="relative inline-block h-6 w-10 rounded-sm bg-slate-50 ring-1 ring-slate-300">
+        {aresta(0, "bottom-0 left-1 right-1 h-1.5")}
+        {aresta(1, "left-1 right-1 top-0 h-1.5")}
+        {aresta(2, "bottom-1 left-0 top-1 w-1.5")}
+        {aresta(3, "bottom-1 right-0 top-1 w-1.5")}
+      </span>
+      <span className="text-xs tabular-nums text-slate-500">{ml > 0 ? `${ml.toFixed(2)} ml` : "sem orla"}</span>
+    </span>
   );
 }
 
