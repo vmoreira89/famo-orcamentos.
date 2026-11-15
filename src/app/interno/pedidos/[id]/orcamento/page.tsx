@@ -19,6 +19,8 @@ import {
   euro,
   novoMovel,
   proporMoveis,
+  movelTampo,
+  precosTampo,
   tampoPorDefeito,
   trocosTampo,
   uid,
@@ -31,7 +33,7 @@ import {
   type TipoMovel,
 } from "@/lib/orcamento";
 import DialogoMotivo from "@/components/DialogoMotivo";
-import { disposicao } from "@/lib/desenho/vistas";
+import { disposicao, paineisTampo } from "@/lib/desenho/vistas";
 import DialogoDesenhos from "@/components/interno/DialogoDesenhos";
 import { eOrcamentista, usePerfil } from "@/components/interno/ContextoInterno";
 
@@ -108,10 +110,10 @@ export default function EditorOrcamento() {
     const out: Record<string, Tampo> = {};
     for (const [k, t] of Object.entries(dados.tampos ?? {})) {
       const d = divisoes.find((x) => x.id === k);
-      out[k] = { ...t, codigo: pedido?.numero_projecto && d ? `03.4.TBY${pedido.numero_projecto.split(".")[0]}.${String(d.ordem).padStart(2, "0")}` : undefined };
+      out[k] = { ...t, codigo: pedido?.numero_projecto && d ? movelTampo(t, d, moveisComCodigo, pedido.numero_projecto).codigo : undefined };
     }
     return out;
-  }, [dados.tampos, divisoes, pedido]);
+  }, [dados.tampos, divisoes, pedido, moveisComCodigo]);
   const totais = useMemo(() => (par ? calcularTotais(dados, divisoes, par, margem) : null), [dados, divisoes, par, margem]);
 
   if (erro) return <p className="p-10 text-center text-slate-500">{erro}</p>;
@@ -151,7 +153,11 @@ export default function EditorOrcamento() {
     });
   }
   function actualizarTudo() {
-    alterar((d) => ({ ...d, moveis: d.moveis.map((m) => actualizarPrecos(m, cat!)) }));
+    alterar((d) => ({
+      ...d,
+      moveis: d.moveis.map((m) => actualizarPrecos(m, cat!)),
+      tampos: Object.fromEntries(Object.entries(d.tampos ?? {}).map(([k, t]) => [k, precosTampo(t, cat!)])),
+    }));
     setPar(cat!.parametros);
   }
 
@@ -255,19 +261,20 @@ export default function EditorOrcamento() {
                     onChange={(e) => e.target.value && acrescentar(div, e.target.value as TipoMovel)}
                   >
                     <option value="">+ Acrescentar móvel…</option>
-                    {(Object.keys(TIPOS_MOVEL) as TipoMovel[]).map((t) => <option key={t} value={t}>{TIPOS_MOVEL[t].nome}</option>)}
+                    {(Object.keys(TIPOS_MOVEL) as TipoMovel[]).filter((t) => t !== "tampo").map((t) => <option key={t} value={t}>{TIPOS_MOVEL[t].nome}</option>)}
                   </select>
                 </div>
               )}
             </div>
             {moveis.length === 0 && <p className="mt-3 text-sm text-slate-400">Ainda sem móveis.</p>}
-            {moveis.length > 0 && <MiniAlcado moveis={moveis} activo={aberto} onEscolher={setAberto} />}
+            {moveis.length > 0 && <MiniAlcado moveis={moveis} tampo={tamposComCodigo[div.id]} activo={aberto} onEscolher={setAberto} />}
             {moveis.some((m) => m.tipo !== "superior" && m.tipo !== "coluna") && (
               <CartaoTampo
                 divisao={div}
                 moveis={moveis}
                 tampo={tamposComCodigo[div.id]}
                 custo={totais.porTampo[div.id]}
+                cat={cat}
                 pode={pode}
                 onChange={(t) => alterar((d) => ({ ...d, tampos: { ...(d.tampos ?? {}), [div.id]: t } }))}
               />
@@ -368,11 +375,12 @@ export default function EditorOrcamento() {
 }
 
 /** Alçado em miniatura de uma divisão: mostra a posição dos móveis; clicar abre o móvel. */
-function MiniAlcado({ moveis, activo, onEscolher }: { moveis: Movel[]; activo: string | null; onEscolher: (id: string) => void }) {
+function MiniAlcado({ moveis, tampo, activo, onEscolher }: { moveis: Movel[]; tampo?: Tampo; activo: string | null; onEscolher: (id: string) => void }) {
   const disp = disposicao(moveis);
+  const tps = paineisTampo(moveis, tampo);
   const pes = (m: Movel) => (TIPOS_MOVEL[m.tipo].pes ? 100 : 0);
   const W = Math.max(...disp.map((d) => d.x + d.m.L), 1);
-  const H = Math.max(...disp.map((d) => d.y + d.m.A + pes(d.m)), 1);
+  const H = Math.max(...disp.map((d) => d.y + d.m.A + pes(d.m)), ...tps.map((t) => t.y + t.h), 1);
   return (
     <div className="mt-3 rounded-md border border-slate-200 bg-white p-3">
       <p className="mb-1 text-xs text-slate-500">Posição dos móveis (vista de frente). Use ▲▼ em cada móvel para mudar a ordem; «Espaço antes» deixa um vão (janela, electrodoméstico…).</p>
@@ -392,17 +400,24 @@ function MiniAlcado({ moveis, activo, onEscolher }: { moveis: Movel[]; activo: s
             </g>
           );
         })}
+        {tps.map((t, i) => (
+          <g key={`tb${i}`}>
+            <rect x={t.x} y={H - t.y - t.h} width={t.w} height={t.h} fill="#c8742c" stroke="#7c4a1e" strokeWidth={5} />
+            <text x={t.x + t.w / 2} y={H - t.y - t.h - 20} textAnchor="middle" fontSize={70} fill="#7c4a1e" fontWeight="bold">TAMPO</text>
+          </g>
+        ))}
       </svg>
     </div>
   );
 }
 
-/** Pergunta e dados do tampo de bancada da divisão. */
+/** Pergunta e dados do tampo de bancada da divisão (produto 10* com peças 03.4*). */
 function CartaoTampo({
   divisao,
   moveis,
   tampo,
   custo,
+  cat,
   pode,
   onChange,
 }: {
@@ -410,9 +425,11 @@ function CartaoTampo({
   moveis: Movel[];
   tampo: Tampo | undefined;
   custo: ReturnType<typeof calcularTotais>["porTampo"][string] | undefined;
+  cat: Catalogo;
   pode: boolean;
   onChange: (t: Tampo) => void;
 }) {
+  const [aberto, setAberto] = useState(false);
   if (!tampo)
     return (
       <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-md border border-sky-200 bg-sky-50 px-4 py-3 text-sm">
@@ -422,103 +439,93 @@ function CartaoTampo({
         </span>
         {pode && (
           <span className="flex gap-2">
-            <button className="btn-primario" onClick={() => onChange(tampoPorDefeito(divisao, moveis))}>Sim</button>
+            <button className="btn-primario" onClick={() => { onChange(tampoPorDefeito(divisao, moveis, cat)); setAberto(true); }}>Sim</button>
             <button className="btn-secundario" onClick={() => onChange({ ...tampoPorDefeito(divisao, moveis), incluir: false })}>Não</button>
           </span>
         )}
       </div>
     );
-  const set = <K extends keyof Tampo>(k: K, v: Tampo[K]) => onChange({ ...tampo, [k]: v });
+  // alterações que mudam o preço voltam a ler a base de dados
+  const set = <K extends keyof Tampo>(k: K, v: Tampo[K]) => {
+    const n = { ...tampo, [k]: v };
+    onChange(["material", "acabamento", "grupo", "espessura"].includes(k as string) ? precosTampo(n, cat) : n);
+  };
   if (!tampo.incluir)
     return (
       <div className="mt-3 flex items-center justify-between rounded-md border border-slate-200 bg-white px-4 py-2 text-sm text-slate-600">
         <span>Sem tampo de bancada neste conjunto.</span>
-        {pode && <button className="text-marca hover:underline" onClick={() => set("incluir", true)}>Adicionar tampo</button>}
+        {pode && <button className="text-marca hover:underline" onClick={() => { onChange(precosTampo({ ...tampo, incluir: true }, cat)); setAberto(true); }}>Adicionar tampo</button>}
       </div>
     );
   const trocos = trocosTampo(moveis);
+  const semPreco = !tampo.terceiros && tampo.preco_m2 == null;
   return (
-    <fieldset className={`cartao mt-3 p-4 ${custo?.pendentes ? "border-amber-300" : ""}`}>
-      <legend className="px-1 text-sm font-semibold">
-        Tampo de bancada <span className="font-mono text-xs font-normal text-slate-500">{tampo.codigo}</span>
-      </legend>
-      <div className="grid gap-3 sm:grid-cols-4 lg:grid-cols-8">
-        <Sel l="Material" v={tampo.material} op={["laminado", "compacto", "madeira", "pedra", "outro"]} rot={{ laminado: "Laminado", compacto: "Compacto", madeira: "Madeira", pedra: "Pedra / quartzo", outro: "Outro" }} on={(v) => set("material", v as Tampo["material"])} pode={pode} semVazio />
-        <div className="sm:col-span-2">
-          <label className="rotulo">Acabamento / referência</label>
-          <input className="campo" list="decors" disabled={!pode} value={tampo.acabamento} onChange={(e) => set("acabamento", e.target.value)} />
-        </div>
-        <Num l="Espessura (mm)" v={tampo.espessura} on={(v) => set("espessura", Math.max(4, v))} pode={pode} />
-        <Num l="Profundidade" v={tampo.profundidade} on={(v) => set("profundidade", Math.max(100, v))} pode={pode} />
-        <Num l="Saliência frente" v={tampo.saliencia} on={(v) => set("saliencia", Math.max(0, v))} pode={pode} />
-        <div>
-          <label className="rotulo">Comprimento</label>
-          <input
-            type="number"
-            className="campo"
-            disabled={!pode}
-            placeholder={`auto: ${trocos.reduce((s, t) => s + t.comp, 0)}`}
-            value={tampo.comprimento ?? ""}
-            onChange={(e) => set("comprimento", e.target.value === "" ? null : Number(e.target.value))}
-          />
-        </div>
-        <Num l="Máx. por troço" v={tampo.comp_max_troco} on={(v) => set("comp_max_troco", Math.max(500, v))} pode={pode} />
-      </div>
-      <label className="mt-3 flex items-center gap-2 text-sm">
-        <input type="checkbox" disabled={!pode} checked={tampo.terceiros} onChange={(e) => set("terceiros", e.target.checked)} />
-        Fornecido / aplicado por terceiros (aparece nos desenhos, sem custo no orçamento)
-      </label>
-      {!tampo.terceiros && (
-        <div className="mt-3 grid gap-3 sm:grid-cols-4">
-          <div>
-            <label className="rotulo">Preço (€/m²)</label>
-            <input type="number" step="any" className={`campo ${tampo.preco_m2 == null ? "border-amber-400 bg-amber-50" : ""}`} disabled={!pode} value={tampo.preco_m2 ?? ""} onChange={(e) => set("preco_m2", e.target.value === "" ? null : Number(e.target.value))} />
+    <div className={`cartao mt-3 ${semPreco ? "border-amber-300" : ""}`}>
+      <button className="flex w-full flex-wrap items-center justify-between gap-2 px-4 py-3 text-left" onClick={() => setAberto(!aberto)} aria-expanded={aberto}>
+        <span>
+          <span className="font-mono text-xs text-slate-500">{tampo.codigo ?? "TB01"}</span>
+          <span className="ml-2 font-semibold">Tampo de bancada</span>
+          <span className="ml-2 text-sm text-slate-500">
+            {custo?.comprimento ?? "?"}×{tampo.profundidade}×{tampo.espessura} mm · {tampo.material} {tampo.acabamento} · {custo?.pecas ?? 1} peça(s)
+          </span>
+        </span>
+        <span className="flex items-center gap-3 text-sm">
+          {semPreco && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-800">sem preço</span>}
+          <span className="font-semibold tabular-nums">{tampo.terceiros ? "terceiros" : euro(custo?.total)}</span>
+          <span className="text-slate-400">{aberto ? "▲" : "▼"}</span>
+        </span>
+      </button>
+      {aberto && (
+        <div className="border-t border-slate-200 p-4">
+          <div className="grid gap-3 sm:grid-cols-4 lg:grid-cols-8">
+            <Sel l="Material" v={tampo.material} op={["laminado", "compacto", "madeira", "pedra", "outro"]} rot={{ laminado: "Laminado", compacto: "Compacto", madeira: "Madeira", pedra: "Pedra / quartzo", outro: "Outro" }} on={(v) => set("material", v as Tampo["material"])} pode={pode} semVazio />
+            <div className="sm:col-span-2">
+              <label className="rotulo">Decor / referência</label>
+              <input className="campo" list="decors" disabled={!pode} value={tampo.acabamento} onChange={(e) => set("acabamento", e.target.value)} />
+            </div>
+            {tampo.material === "laminado" && (
+              <Sel l="Grupo (se o decor não tiver)" v={tampo.grupo ?? ""} op={Array.from(new Set(cat.gruposPreco.map((g) => g.grupo))).filter(Boolean).sort()} on={(v) => set("grupo", v)} pode={pode} />
+            )}
+            <Num l="Espessura (mm)" v={tampo.espessura} on={(v) => set("espessura", Math.max(4, v))} pode={pode} />
+            <Num l="Profundidade" v={tampo.profundidade} on={(v) => set("profundidade", Math.max(100, v))} pode={pode} />
+            <Num l="Saliência frente" v={tampo.saliencia} on={(v) => set("saliencia", Math.max(0, v))} pode={pode} />
+            <div>
+              <label className="rotulo">Comprimento</label>
+              <input type="number" className="campo" disabled={!pode} placeholder={`auto: ${trocos.reduce((s, t) => s + t.comp, 0)}`} value={tampo.comprimento ?? ""} onChange={(e) => set("comprimento", e.target.value === "" ? null : Number(e.target.value))} />
+            </div>
+            <Num l="Máx. por peça" v={tampo.comp_max_troco} on={(v) => set("comp_max_troco", Math.max(500, v))} pode={pode} />
           </div>
-          <div>
-            <label className="rotulo">Orla / remate frente (€/ml)</label>
-            <input type="number" step="any" className="campo" disabled={!pode} value={tampo.orla_ml ?? ""} onChange={(e) => set("orla_ml", e.target.value === "" ? null : Number(e.target.value))} />
+          <div className="mt-3 grid gap-3 sm:grid-cols-4">
+            <div>
+              <label className="rotulo">Preço da placa (€/m²)</label>
+              <input type="number" step="any" className={`campo ${semPreco ? "border-amber-400 bg-amber-50" : ""}`} disabled={!pode || tampo.terceiros} value={tampo.preco_m2 ?? ""} onChange={(e) => onChange({ ...tampo, preco_m2: e.target.value === "" ? null : Number(e.target.value) })} />
+              <p className="mt-1 text-xs text-slate-500">{tampo.material === "laminado" ? "Lido do grupo/decor na espessura indicada; pode ajustar." : "Sem tabela para este material: preencha."}</p>
+            </div>
+            <div>
+              <label className="rotulo">Orla (€/ml)</label>
+              <input type="number" step="any" className="campo" disabled={!pode || tampo.terceiros} value={tampo.preco_orla_ml ?? ""} onChange={(e) => onChange({ ...tampo, preco_orla_ml: e.target.value === "" ? null : Number(e.target.value) })} />
+              <p className="mt-1 text-xs text-slate-500">Orla em todo o perímetro, como nas outras peças.</p>
+            </div>
+            <div className="sm:col-span-2">
+              <label className="rotulo">Notas</label>
+              <input className="campo" disabled={!pode} value={tampo.notas} onChange={(e) => onChange({ ...tampo, notas: e.target.value })} />
+            </div>
           </div>
-          <Num l="Mão de obra (min)" v={tampo.minutos} on={(v) => set("minutos", Math.max(0, v))} pode={pode} />
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-sm">
+            <label className="flex items-center gap-2">
+              <input type="checkbox" disabled={!pode} checked={tampo.terceiros} onChange={(e) => onChange({ ...tampo, terceiros: e.target.checked })} />
+              Fornecido / aplicado por terceiros (só desenhado, sem custo)
+            </label>
+            {custo && !tampo.terceiros && (
+              <span className="text-xs text-slate-500">
+                Material {euro(custo.material)} · orla {euro(custo.orla)} ({custo.orla_ml} ml) · desperdício {euro(custo.desperdicio)} · operações {euro(custo.mao_obra)} = <strong>{euro(custo.total)}</strong>
+              </span>
+            )}
+            {pode && <button className="text-rose-700 hover:underline" onClick={() => onChange({ ...tampo, incluir: false })}>Retirar tampo</button>}
+          </div>
         </div>
       )}
-      <div className="mt-3">
-        <p className="rotulo">Recortes e trabalhos</p>
-        <ul className="space-y-1">
-          {tampo.recortes.map((rc) => (
-            <li key={rc.id} className="flex flex-wrap items-center gap-2 text-sm">
-              {celula(pode, rc.descricao, (v) => set("recortes", tampo.recortes.map((x) => (x.id === rc.id ? { ...x, descricao: v } : x))), "text", "w-64")}
-              {celula(pode, rc.qtd, (v) => set("recortes", tampo.recortes.map((x) => (x.id === rc.id ? { ...x, qtd: Number(v) || 1 } : x))), "number", "w-14")}
-              <span className="text-slate-500">×</span>
-              {celula(pode, rc.preco, (v) => set("recortes", tampo.recortes.map((x) => (x.id === rc.id ? { ...x, preco: numOuNull(v) } : x))), "number", "w-20", rc.preco == null && !tampo.terceiros)}
-              <span className="text-slate-500">€</span>
-              {pode && <button className="text-xs text-rose-700" aria-label="Remover recorte" onClick={() => set("recortes", tampo.recortes.filter((x) => x.id !== rc.id))}>✕</button>}
-            </li>
-          ))}
-        </ul>
-        {pode && (
-          <div className="mt-1 flex flex-wrap gap-3 text-sm">
-            {["Recorte placa", "Recorte lava-loiça", "Furo torneira", "Junta / união"].map((t) => (
-              <button key={t} className="text-marca hover:underline" onClick={() => set("recortes", [...tampo.recortes, { id: uid(), descricao: t, qtd: 1, preco: null }])}>+ {t}</button>
-            ))}
-          </div>
-        )}
-      </div>
-      <div className="mt-3 grid gap-3 sm:grid-cols-2">
-        <div>
-          <label className="rotulo">Notas</label>
-          <input className="campo" disabled={!pode} value={tampo.notas} onChange={(e) => set("notas", e.target.value)} />
-        </div>
-        <div className="flex items-end justify-between gap-2 text-sm">
-          {custo && (
-            <span className="text-slate-600">
-              {custo.comprimento} mm · {custo.area_m2} m² · {custo.pecas} peça(s){trocos.length > 1 && tampo.comprimento == null ? ` em ${trocos.length} troços` : ""} ·{" "}
-              <strong>{tampo.terceiros ? "por terceiros" : euro(custo.total)}</strong>
-            </span>
-          )}
-          {pode && <button className="text-rose-700 hover:underline" onClick={() => set("incluir", false)}>Retirar tampo</button>}
-        </div>
-      </div>
-    </fieldset>
+    </div>
   );
 }
 

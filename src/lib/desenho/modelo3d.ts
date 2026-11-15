@@ -71,6 +71,7 @@ export function modelo3d(m: Movel): Painel[] {
   const L = m.L, A = m.A, P = m.P, ec = m.costa_e;
   const y0 = alturaPes(m);
   const ps: Painel[] = [];
+  if (m.tipo === "tampo") return [{ nome: "Tampo", tipo: "tampo", x: 0, y: 0, z: 0, w: L, h: A, d: P, ref: m.pecas[0]?.codigo }];
   const ref = (nome: string) => m.pecas.find((p) => p.designacao.toLowerCase().startsWith(nome.toLowerCase()))?.codigo;
   ps.push({ nome: "Lado esquerdo", tipo: "corpo", x: 0, y: y0, z: 0, w: E, h: A, d: P, ref: ref("Lado esquerdo") });
   ps.push({ nome: "Lado direito", tipo: "corpo", x: L - E, y: y0, z: 0, w: E, h: A, d: P, ref: ref("Lado direito") });

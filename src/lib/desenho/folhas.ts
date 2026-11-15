@@ -1,7 +1,7 @@
 import type { PDFDocument } from "pdf-lib";
 import type { Divisao } from "../pedido";
 import { nomeDivisao, nomeMaterial, nomeMdf } from "../pedido";
-import { arestasOrla, comprimentoTampo, type EspecMaterial, type Movel, type Peca, type Tampo } from "../orcamento";
+import { arestasOrla, movelTampo, type EspecMaterial, type Movel, type Peca, type Tampo } from "../orcamento";
 import { deslocar, furacao, juntar, legendaFuros, vistaPeca } from "./geometria";
 import {
   alcadoConjunto,
@@ -137,7 +137,7 @@ export async function pdfMovel(mod: Modelos, m: Movel, ctx: Contexto) {
     destino: "MONTAGEM",
     escala: `1:${s}`,
     material: kg(pesoTotal),
-    codigoMaterial: descMaterial(m.corpo, 19),
+    codigoMaterial: descMaterial(m.corpo, m.tipo === "tampo" ? m.A : 19),
     acabamento: [m.corpo.acabamento, m.frente.acabamento !== m.corpo.acabamento ? m.frente.acabamento : ""].filter(Boolean).join(" / "),
     desenhou: ctx.desenhou,
     data: ctx.data,
@@ -161,16 +161,19 @@ export async function pdfConjunto(mod: Modelos, d: Divisao, moveis: Movel[], cod
     peso: kg(m.pecas.reduce((a, p) => a + pesoPeca(p), 0) * m.qtd),
     _i: i,
   }));
-  if (tampo?.incluir)
+  // só produtos 10* na legenda do produto final
+  if (tampo?.incluir) {
+    const mt = movelTampo(tampo, d, moveis, ctx.numero);
     linhas.unshift({
       qtd: "1",
-      designacao: `Tampo de bancada ${comprimentoTampo(tampo, moveis)}x${tampo.profundidade}x${tampo.espessura}mm${tampo.terceiros ? " (terceiros)" : ""}`,
-      codigo: tampo.codigo ?? "",
-      material: `${tampo.material} ${tampo.acabamento}`.trim(),
-      ref: "TB",
-      peso: "",
+      designacao: `Tampo de bancada ${mt.L}x${mt.P}x${mt.A}mm${tampo.terceiros ? " (terceiros)" : ""}`,
+      codigo: mt.codigo ?? "",
+      material: descMaterial(mt.corpo, mt.A),
+      ref: mt.ref,
+      peso: kg(mt.pecas.reduce((a, p) => a + pesoPeca(p), 0)),
       _i: -1,
     });
+  }
   const topoLista = listaMaterial(pg, r, linhas, ZONA.YT - 200);
   const alc = alcadoConjunto(moveis, tampo);
   const lado = ladoConjunto(moveis, tampo);
@@ -195,24 +198,3 @@ export async function pdfConjunto(mod: Modelos, d: Divisao, moveis: Movel[], cod
   return finalizar(r.doc);
 }
 
-/* ------------------------------------------------------------------ tampo de bancada (peça) */
-
-/** Converte cada troço do tampo numa peça para folha PDF/DXF. */
-export function pecasTampo(t: Tampo, moveis: Movel[]): { peca: Peca; movel: Movel }[] {
-  const comp = comprimentoTampo(t, moveis);
-  const n = Math.max(1, Math.ceil(comp / Math.max(500, t.comp_max_troco)));
-  const espec: EspecMaterial = { material: t.material === "laminado" ? "laminado" : "madeira", mdf: "", acabamento: `${t.material} ${t.acabamento}`.trim(), grupo: "", extra_m2: null };
-  const base = moveis[0];
-  return Array.from({ length: n }, (_, i) => {
-    const c = i < n - 1 ? Math.round(comp / n) : comp - Math.round(comp / n) * (n - 1);
-    const peca: Peca = {
-      id: `tampo-${i}`, designacao: n > 1 ? `Tampo de bancada (troço ${i + 1}/${n})` : "Tampo de bancada", qtd: 1,
-      c, l: t.profundidade, e: t.espessura, sup: "manual", oc: 2, ol: 0, orlas: [true, false, false, false], subconjunto: "",
-      preco_m2: t.preco_m2, preco_extra_m2: null, faces_extra: 0, preco_orla_ml: t.orla_ml,
-      nota: [t.terceiros ? "Fornecido/aplicado por terceiros" : "", t.recortes.map((r) => `${r.qtd}x ${r.descricao}`).join(", "), t.notas].filter(Boolean).join(" · "),
-      codigo: n > 1 ? `${t.codigo ?? "TAMPO"}-${i + 1}` : t.codigo ?? "TAMPO",
-    };
-    const movel: Movel = { ...base, designacao: "Conjunto", codigo: t.codigo, ref: "TB", corpo: espec, frente: espec, pecas: [peca], prateleiras: 0, portas: 0, gavetas: 0, tipo: "outro" };
-    return { peca, movel };
-  });
-}

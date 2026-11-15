@@ -13,6 +13,7 @@ const visivelNaFrente = (p: Painel) => p.tipo === "frente" || p.tipo === "puxado
 /* ------------------------------------------------------------------ frente */
 
 export function entidadesFrente(m: Movel, dx = 0, dy = 0): Entidade[] {
+  if (m.tipo === "tampo") return [...rect(dx, dy, m.L, m.A), ...m.pecas.slice(0, -1).reduce<{ x: number; e: Entidade[] }>((acc, p) => { acc.x += p.c; acc.e.push({ t: "linha", x1: dx + acc.x, y1: dy, x2: dx + acc.x, y2: dy + m.A, fina: true }); return acc; }, { x: 0, e: [] }).e];
   const ps = modelo3d(m);
   const y0 = alturaPes(m);
   const ents: Entidade[] = [];
@@ -45,6 +46,13 @@ export function entidadesFrente(m: Movel, dx = 0, dy = 0): Entidade[] {
 }
 
 export function vistaFrenteMovel(m: Movel): Vista {
+  if (m.tipo === "tampo") {
+    const e = entidadesFrente(m);
+    let x = 0;
+    for (const p of m.pecas) { e.push({ t: "cota", x1: x, y1: m.A, x2: x + p.c, y2: m.A, off: 40 }); x += p.c; }
+    e.push({ t: "cota", x1: 0, y1: m.A, x2: m.L, y2: m.A, off: 80 }, { t: "cota", x1: 0, y1: 0, x2: 0, y2: m.A, off: -40 });
+    return limites(e);
+  }
   const ents = entidadesFrente(m);
   const y0 = alturaPes(m);
   const H = m.A + y0;
@@ -68,6 +76,7 @@ export function vistaFrenteMovel(m: Movel): Vista {
 /* ------------------------------------------------------------------ lado (vista da esquerda: frente à direita) */
 
 export function entidadesLado(m: Movel, dx = 0, dy = 0): Entidade[] {
+  if (m.tipo === "tampo") return rect(dx, dy, m.P, m.A);
   const ps = modelo3d(m);
   const y0 = alturaPes(m);
   const P = m.P;
@@ -100,6 +109,7 @@ export function vistaLadoMovel(m: Movel): Vista {
 /* ------------------------------------------------------------------ topo (1.º diedro: frente para baixo) */
 
 export function vistaTopoMovel(m: Movel): Vista {
+  if (m.tipo === "tampo") return limites([...rect(0, 0, m.L, m.P), { t: "cota", x1: 0, y1: 0, x2: m.L, y2: 0, off: -50 }]);
   const ps = modelo3d(m);
   const ents: Entidade[] = [...rect(0, 0, m.L, m.P)];
   ents.push({ t: "linha", x1: E, y1: 0, x2: E, y2: m.P, tracejado: true, fina: true });
@@ -235,7 +245,7 @@ export function alvosIso(paineis: PainelMundo[], numeros: Record<string, string>
 
 /** Dispõe os móveis de uma divisão pela ordem definida no orçamento. */
 export function disposicao(moveis: Movel[]) {
-  const baixo = moveis.filter((m) => m.tipo !== "superior");
+  const baixo = moveis.filter((m) => m.tipo !== "superior" && m.tipo !== "tampo");
   const cima = moveis.filter((m) => m.tipo === "superior");
   const out: { m: Movel; x: number; y: number }[] = [];
   let x = 0;

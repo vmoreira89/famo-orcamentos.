@@ -10,7 +10,7 @@ import type { Divisao, Material, Mdf, TipoDivisao } from "./pedido";
 
 /* ------------------------------------------------------------------ tipos */
 
-export type TipoMovel = "inferior" | "superior" | "coluna" | "gaveteiro" | "roupeiro" | "estante" | "wc" | "outro";
+export type TipoMovel = "inferior" | "superior" | "coluna" | "gaveteiro" | "roupeiro" | "estante" | "wc" | "outro" | "tampo";
 
 export const TIPOS_MOVEL: Record<TipoMovel, { nome: string; ref: string; L: number; A: number; P: number; pes: boolean }> = {
   inferior: { nome: "Móvel inferior", ref: "INF", L: 600, A: 720, P: 560, pes: true },
@@ -21,6 +21,7 @@ export const TIPOS_MOVEL: Record<TipoMovel, { nome: string; ref: string; L: numb
   estante: { nome: "Estante / aberto", ref: "EST", L: 800, A: 1800, P: 350, pes: false },
   wc: { nome: "Móvel WC", ref: "WC", L: 800, A: 500, P: 450, pes: false },
   outro: { nome: "Outro", ref: "MOV", L: 600, A: 720, P: 500, pes: false },
+  tampo: { nome: "Tampo de bancada", ref: "TB", L: 2400, A: 25, P: 600, pes: false },
 };
 
 /** Como se obtém o preço de uma superfície (corpo ou frentes). */
@@ -85,51 +86,55 @@ export type Movel = {
   codigo?: string;
 };
 
-export type Recorte = { id: string; descricao: string; qtd: number; preco: number | null };
-
-/** Tampo de bancada de uma divisão (elemento do conjunto, sobre os móveis de baixo). */
+/** Tampo de bancada de uma divisão: produto 10* com uma peça 03.4* por troço. */
 export type Tampo = {
   incluir: boolean;
   material: "laminado" | "compacto" | "madeira" | "pedra" | "outro";
   acabamento: string;
+  grupo?: string; // grupo de laminado, se o decor não tiver grupo
   espessura: number;
   profundidade: number;
   saliencia: number; // mm à frente das portas
   comprimento: number | null; // null = soma automática dos móveis de baixo (sem colunas)
   comp_max_troco: number; // comprimento máximo de cada troço (placa)
   terceiros: boolean; // fornecido/aplicado por terceiros (só desenhado, sem custo)
-  preco_m2: number | null;
-  orla_ml: number | null; // preço da orla/remate frontal por ml
-  minutos: number; // mão de obra (corte, orla, ajuste)
-  recortes: Recorte[];
+  preco_m2: number | null; // guardado no orçamento (lido da base de dados ou manual)
+  preco_orla_ml?: number | null;
   notas: string;
   codigo?: string;
 };
 
 export type DadosOrcamento = { moveis: Movel[]; extras_gerais: LinhaExtra[]; tampos?: Record<string, Tampo> };
 
-export function tampoPorDefeito(d: Divisao, moveis: Movel[]): Tampo {
+export function tampoPorDefeito(d: Divisao, moveis: Movel[], cat?: Catalogo): Tampo {
   const txt = (d.descritivo?.tampo ?? "").toLowerCase();
   const esp = parseInt(txt.match(/(\d{2})\s*mm/)?.[1] ?? "", 10);
   const material: Tampo["material"] = txt.includes("compacto") ? "compacto" : txt.includes("pedra") || txt.includes("granito") || txt.includes("quartz") || txt.includes("silestone") ? "pedra" : txt.includes("madeira") ? "madeira" : "laminado";
-  const baixo = moveis.filter((m) => m.divisao_id === d.id && m.tipo !== "superior" && m.tipo !== "coluna");
+  const baixo = moveis.filter((m) => m.divisao_id === d.id && m.tipo !== "superior" && m.tipo !== "coluna" && m.tipo !== "tampo");
   const P = Math.max(560, ...baixo.map((m) => m.P));
-  return {
+  const t: Tampo = {
     incluir: true,
     material,
     acabamento: d.descritivo?.acabamento_ref ?? "",
-    espessura: Number.isFinite(esp) ? esp : material === "compacto" ? 12 : material === "pedra" ? 20 : 38,
+    grupo: "",
+    espessura: Number.isFinite(esp) ? esp : material === "compacto" ? 12 : material === "pedra" ? 20 : 25,
     profundidade: P + 19 + 2 + 20,
     saliencia: 20,
     comprimento: null,
     comp_max_troco: material === "pedra" ? 3000 : 4100,
     terceiros: material === "pedra",
     preco_m2: null,
-    orla_ml: null,
-    minutos: 30,
-    recortes: [],
+    preco_orla_ml: null,
     notas: d.descritivo?.tampo ?? "",
   };
+  return cat ? precosTampo(t, cat) : t;
+}
+
+/** Lê da base de dados o preço do tampo (grupo/decor por espessura) e da orla. */
+export function precosTampo(t: Tampo, cat: Catalogo): Tampo {
+  if (t.material !== "laminado") return { ...t, preco_orla_ml: t.preco_orla_ml ?? cat.parametros.orla_preco_ml };
+  const esp: EspecMaterial = { material: "laminado", mdf: "", acabamento: t.acabamento, grupo: t.grupo ?? "", extra_m2: null };
+  return { ...t, preco_m2: precoPlaca(cat, esp, t.espessura).m2, preco_orla_ml: precoOrla(cat, esp) };
 }
 
 /** Troços contínuos de móveis de baixo (as colunas e os espaços interrompem o tampo). */
@@ -137,7 +142,7 @@ export function trocosTampo(moveis: Movel[]): { x: number; comp: number }[] {
   const out: { x: number; comp: number }[] = [];
   let x = 0;
   let atual: { x: number; comp: number } | null = null;
-  for (const m of moveis.filter((mm) => mm.tipo !== "superior")) {
+  for (const m of moveis.filter((mm) => mm.tipo !== "superior" && mm.tipo !== "tampo")) {
     const esp = m.espaco_antes ?? 0;
     if (esp > 0 && atual) { out.push(atual); atual = null; }
     x += esp;
@@ -159,26 +164,51 @@ export function comprimentoTampo(t: Tampo, moveis: Movel[]) {
   return t.comprimento ?? trocosTampo(moveis).reduce((s, tr) => s + tr.comp, 0);
 }
 
-export type CustoTampo = { comprimento: number; area_m2: number; pecas: number; material: number; orla: number; desperdicio: number; recortes: number; mao_obra: number; total: number; pendentes: number };
+export type CustoTampo = CustoMovel & { comprimento: number; pecas: number };
 
-export function custoTampo(t: Tampo, moveis: Movel[], par: Parametros): CustoTampo {
-  const comp = comprimentoTampo(t, moveis);
-  const trocos = t.comprimento != null ? [{ comp }] : trocosTampo(moveis);
-  const pecas = trocos.reduce((s, tr) => s + Math.max(1, Math.ceil(tr.comp / Math.max(500, t.comp_max_troco))), 0);
-  const area = (comp * t.profundidade) / 1e6;
-  if (!t.incluir || t.terceiros) return { comprimento: comp, area_m2: r2(area), pecas, material: 0, orla: 0, desperdicio: 0, recortes: 0, mao_obra: 0, total: 0, pendentes: 0 };
-  let pend = 0;
-  const material = t.preco_m2 == null ? (pend++, 0) : area * t.preco_m2;
-  const orla = t.orla_ml == null ? 0 : (comp / 1000) * t.orla_ml;
-  const desperdicio = (material + orla) * (par.desperdicio_pct / 100);
-  let recortes = 0;
-  for (const rc of t.recortes) {
-    if (rc.preco == null) pend++;
-    else recortes += rc.qtd * rc.preco;
+export function custoTampo(t: Tampo, d: Divisao, moveis: Movel[], par: Parametros): CustoTampo {
+  const m = movelTampo(t, d, moveis, null);
+  const c = custoMovel(m, par);
+  return { ...c, comprimento: m.L, pecas: m.pecas.length };
+}
+
+/** Produto 10* do tampo, com uma peça 03.4* por troço (orlada em todo o perímetro). */
+export function movelTampo(t: Tampo, d: Divisao, moveis: Movel[], numero: string | null): Movel {
+  const doProduto = moveis.filter((m) => m.divisao_id === d.id && m.tipo !== "tampo");
+  const comp = comprimentoTampo(t, doProduto);
+  const trocos = t.comprimento != null ? [{ x: 0, comp: t.comprimento }] : trocosTampo(doProduto);
+  const base = numero?.split(".")[0];
+  const suf = base ? `Y${base}.${String(d.ordem).padStart(2, "0")}` : "";
+  let seq = doProduto.reduce((s, m) => s + m.pecas.length, 0);
+  const espec: EspecMaterial = { material: t.material === "laminado" ? "laminado" : "madeira", mdf: "", acabamento: t.acabamento, grupo: t.grupo ?? "", extra_m2: null };
+  const pecas: Peca[] = [];
+  for (const tr of trocos) {
+    const n = Math.max(1, Math.ceil(tr.comp / Math.max(500, t.comp_max_troco)));
+    for (let i = 0; i < n; i++) {
+      const c = i < n - 1 ? Math.round(tr.comp / n) : tr.comp - Math.round(tr.comp / n) * (n - 1);
+      seq++;
+      pecas.push({
+        id: `tampo-${d.id}-${seq}`,
+        designacao: trocos.length > 1 || n > 1 ? `Tampo de bancada (troço ${pecas.length + 1})` : "Tampo de bancada",
+        qtd: 1, c, l: t.profundidade, e: t.espessura, sup: "manual", oc: 2, ol: 2, subconjunto: "",
+        preco_m2: t.terceiros ? 0 : t.preco_m2, preco_extra_m2: null, faces_extra: 0,
+        preco_orla_ml: t.terceiros ? 0 : t.preco_orla_ml ?? null,
+        nota: [t.material !== "laminado" ? t.material : "", t.terceiros ? "fornecido por terceiros" : "", t.notas].filter(Boolean).join(" · "),
+        codigo: suf ? `03.4.${seq}${suf}` : undefined,
+      });
+    }
   }
-  const mao = t.minutos * par.custo_minuto;
-  const total = material + orla + desperdicio + recortes + mao;
-  return { comprimento: comp, area_m2: r2(area), pecas, material: r2(material), orla: r2(orla), desperdicio: r2(desperdicio), recortes: r2(recortes), mao_obra: r2(mao), total: r2(total), pendentes: pend };
+  const orlaMl = pecas.reduce((s, p) => s + (2 * p.c + 2 * p.l) / 1000, 0);
+  const operacoes: LinhaOperacao[] = t.terceiros ? [] : [
+    { id: `op-c-${d.id}`, posto: "L70SEC.01", descricao: "Corte", minutos: r2(pecas.length * 1), custo_minuto: null },
+    { id: `op-o-${d.id}`, posto: "ORLADORA", descricao: "Orladora", minutos: r2(orlaMl * 0.6), custo_minuto: null },
+  ];
+  return {
+    id: `tampo-${d.id}`, divisao_id: d.id, tipo: "tampo", ref: "TB01", designacao: "Tampo de bancada", qtd: 1,
+    L: comp, A: t.espessura, P: t.profundidade, portas: 0, gavetas: 0, prateleiras: 0, tipo_porta: "", puxador: "", costa_e: 0,
+    corpo: espec, frente: espec, checklist: {}, pecas, ferragens: [], operacoes, extras: [], notas: t.notas,
+    codigo: suf ? `10TB01${suf}` : undefined,
+  };
 }
 
 export type Parametros = { custo_minuto: number; desperdicio_pct: number; orla_preco_ml: number };
@@ -595,7 +625,7 @@ export function calcularTotais(dados: DadosOrcamento, divisoes: Divisao[], par: 
   for (const d of divisoes) {
     const t = dados.tampos?.[d.id];
     if (!t?.incluir) continue;
-    const ct = custoTampo(t, dados.moveis.filter((m) => m.divisao_id === d.id), par);
+    const ct = custoTampo(t, d, dados.moveis, par);
     porTampo[d.id] = ct;
     pend += ct.pendentes;
     porDivisao[d.id].custo += ct.total;
