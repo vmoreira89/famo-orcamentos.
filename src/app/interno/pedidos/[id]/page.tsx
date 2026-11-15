@@ -17,7 +17,7 @@ import {
   type Permissoes,
 } from "@/lib/pedido";
 import DialogoMotivo from "@/components/DialogoMotivo";
-import { SecaoComentarios, SecaoDados, SecaoDivisoes, SecaoFicheiros, SecaoHistorico, type Autorizacao } from "./seccoes";
+import { SecaoComentarios, SecaoDados, SecaoDesenhos, SecaoDivisoes, SecaoFicheiros, SecaoHistorico, type Autorizacao } from "./seccoes";
 
 type Dialogo = null | "iniciar" | "estado" | "numero" | "responsavel" | "autorizar";
 
@@ -164,6 +164,7 @@ export default function DetalhePedido() {
           <SecaoDados key={`d${versao}`} pedido={pedido} podeEditar={perm.pode_editar} rpc={rpc} />
           <SecaoDivisoes key={`v${versao}`} pedidoId={pedido.id} divisoes={divisoes} podeEditar={perm.pode_editar} rpc={rpc} />
           <SecaoFicheiros pedidoId={pedido.id} ficheiros={ficheiros} divisoes={divisoes} podeEditar={perm.pode_editar} rpc={rpc} />
+          <SecaoDesenhos key={`g${versao}`} pedidoId={pedido.id} nomeDe={nomeDe} />
         </div>
         <div className="space-y-6">
           <SecaoComentarios

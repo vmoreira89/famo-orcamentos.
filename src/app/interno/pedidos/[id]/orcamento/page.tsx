@@ -28,6 +28,8 @@ import {
   type TipoMovel,
 } from "@/lib/orcamento";
 import DialogoMotivo from "@/components/DialogoMotivo";
+import DialogoDesenhos from "@/components/interno/DialogoDesenhos";
+import { eOrcamentista, usePerfil } from "@/components/interno/ContextoInterno";
 
 type LinhaOrc = { versao: number; dados: DadosOrcamento; parametros: Parametros; margem_pct: number };
 
@@ -47,6 +49,8 @@ export default function EditorOrcamento() {
   const [sujo, setSujo] = useState(false);
   const [guardar, setGuardar] = useState(false);
   const [relatorio, setRelatorio] = useState(false);
+  const [desenhos, setDesenhos] = useState(false);
+  const perfil = usePerfil();
   const [aberto, setAberto] = useState<string | null>(null);
   const [erro, setErro] = useState("");
 
@@ -149,6 +153,11 @@ export default function EditorOrcamento() {
                 {sujo ? "Guardar orçamento" : "Guardado"}
               </button>
             </>
+          )}
+          {eOrcamentista(perfil.nivel) && versao && pedido.numero_projecto && (
+            <button className="btn-secundario" disabled={sujo} onClick={() => setDesenhos(true)} title={sujo ? "Guarde primeiro" : "Gerar PDF e DXF"}>
+              Desenhos
+            </button>
           )}
           {gestao && versao && (
             <button className="btn-secundario" disabled={sujo} onClick={() => setRelatorio(true)} title={sujo ? "Guarde primeiro" : ""}>
@@ -298,6 +307,20 @@ export default function EditorOrcamento() {
           return null;
         }}
       />
+
+      {pedido.numero_projecto && (
+        <DialogoDesenhos
+          aberto={desenhos}
+          onFechar={() => setDesenhos(false)}
+          pedidoId={id}
+          numero={pedido.numero_projecto}
+          referencia={pedido.referencia}
+          versao={versao}
+          divisoes={divisoes}
+          moveis={moveisComCodigo}
+          autor={perfil.nome || perfil.email}
+        />
+      )}
 
       <DialogoRelatorio aberto={relatorio} onFechar={() => setRelatorio(false)} onEscolher={(tipo, formato) => router.push(`/interno/pedidos/${id}/relatorio?tipo=${tipo}&formato=${formato}`)} />
     </div>

@@ -568,6 +568,7 @@ function descrever(r: Registo): { titulo: string; mudancas: string[] } {
     pedido_ficheiros: { INSERT: `Ficheiro anexado: ${nome}`, UPDATE: `Ficheiro alterado: ${nome}`, DELETE: `Ficheiro retirado: ${nome}` },
     comentarios: { INSERT: "Comentário adicionado", UPDATE: "Comentário actualizado", DELETE: "Comentário apagado" },
     autorizacoes: { INSERT: "Autorização de edição concedida", UPDATE: "Autorização alterada", DELETE: "Autorização apagada" },
+    desenhos_gerados: { INSERT: "Desenhos gerados", UPDATE: "Desenhos alterados", DELETE: "Desenhos apagados" },
     orcamentos: { INSERT: "Orçamento guardado (1.ª versão)", UPDATE: `Orçamento guardado (versão ${r.depois?.versao ?? "?"})`, DELETE: "Orçamento apagado" },
   };
   const titulo = t[r.tabela]?.[r.accao] ?? `${r.tabela} ${r.accao}`;
@@ -627,6 +628,44 @@ export function SecaoHistorico({ pedidoId }: { pedidoId: string }) {
           {todos ? "Mostrar menos" : `Ver tudo (${registos.length})`}
         </button>
       )}
+    </section>
+  );
+}
+
+/* ---------------------------------------------------------------- Desenhos gerados */
+
+type PacoteDesenhos = { id: string; storage_path: string; versao_orcamento: number | null; n_ficheiros: number | null; tamanho: number | null; criado_por: string; created_at: string };
+
+export function SecaoDesenhos({ pedidoId, nomeDe }: { pedidoId: string; nomeDe: (id: string | null) => string }) {
+  const [pacotes, setPacotes] = useState<PacoteDesenhos[]>([]);
+  useEffect(() => {
+    supabase()
+      .from("desenhos_gerados")
+      .select("*")
+      .eq("pedido_id", pedidoId)
+      .order("created_at", { ascending: false })
+      .then(({ data }) => setPacotes((data as PacoteDesenhos[]) ?? []));
+  }, [pedidoId]);
+  async function abrir(p: PacoteDesenhos) {
+    const nome = p.storage_path.split("/").pop();
+    const { data, error } = await supabase().storage.from("pedidos").createSignedUrl(p.storage_path, 300, { download: nome });
+    if (error || !data) alert("Não foi possível descarregar.");
+    else window.location.href = data.signedUrl;
+  }
+  return (
+    <section className="cartao p-5">
+      <Cabecalho titulo={`Desenhos gerados (${pacotes.length})`} />
+      {pacotes.length === 0 && <p className="text-sm text-slate-400">Ainda não foram gerados desenhos. Use o botão «Desenhos» na página do orçamento.</p>}
+      <ul className="space-y-1">
+        {pacotes.map((p) => (
+          <li key={p.id} className="flex flex-wrap items-center justify-between gap-2 rounded bg-slate-50 px-3 py-1.5 text-sm">
+            <button className="text-left text-marca hover:underline" onClick={() => abrir(p)}>📦 {p.storage_path.split("/").pop()}</button>
+            <span className="text-xs text-slate-500">
+              {p.n_ficheiros ?? "?"} ficheiros · {p.tamanho ? `${(p.tamanho / 1024 / 1024).toFixed(1)} MB` : ""} · orçamento v{p.versao_orcamento ?? "?"} · {nomeDe(p.criado_por)} · {dataHora(p.created_at)}
+            </span>
+          </li>
+        ))}
+      </ul>
     </section>
   );
 }
