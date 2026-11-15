@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { supabase } from "@/lib/supabase";
 import type { Divisao } from "@/lib/pedido";
-import type { Movel } from "@/lib/orcamento";
+import type { Movel, Tampo } from "@/lib/orcamento";
 
 type Opcoes = { conjunto: boolean; moveis: boolean; pecasPdf: boolean; pecasDxf: boolean };
 
@@ -17,8 +17,10 @@ export default function DialogoDesenhos({
   versao,
   divisoes,
   moveis,
+  tampos = {},
   autor,
 }: {
+  tampos?: Record<string, Tampo>;
   aberto: boolean;
   onFechar: () => void;
   pedidoId: string;
@@ -48,7 +50,7 @@ export default function DialogoDesenhos({
       const { gerarPacote } = await import("@/lib/desenho/pacote");
       const agora = new Date();
       const ctx = { numero, data: agora.toLocaleDateString("pt-PT"), desenhou: autor, processo: referencia };
-      const { blob, lista } = await gerarPacote(numero, divisoes, moveis, op, ctx, (f, t) => setEstado(`A gerar ficheiros… ${f}/${t}`));
+      const { blob, lista } = await gerarPacote(numero, divisoes, moveis, op, ctx, (f, t) => setEstado(`A gerar ficheiros… ${f}/${t}`), tampos);
       const carimbo = agora.toISOString().slice(0, 16).replace(/[-:T]/g, "");
       const nome = `${numero}_desenhos_${carimbo}.zip`;
       // descarrega já

@@ -1,7 +1,7 @@
 import type { PDFDocument } from "pdf-lib";
 import type { Divisao } from "../pedido";
 import { nomeDivisao, nomeMaterial, nomeMdf } from "../pedido";
-import { arestasOrla, type EspecMaterial, type Movel, type Peca } from "../orcamento";
+import { arestasOrla, comprimentoTampo, type EspecMaterial, type Movel, type Peca, type Tampo } from "../orcamento";
 import { deslocar, furacao, juntar, legendaFuros, vistaPeca } from "./geometria";
 import {
   alcadoConjunto,
@@ -148,7 +148,7 @@ export async function pdfMovel(mod: Modelos, m: Movel, ctx: Contexto) {
 
 /* ------------------------------------------------------------------ conjunto (produto completo) */
 
-export async function pdfConjunto(mod: Modelos, d: Divisao, moveis: Movel[], codigoProduto: string, ctx: Contexto) {
+export async function pdfConjunto(mod: Modelos, d: Divisao, moveis: Movel[], codigoProduto: string, ctx: Contexto, tampo?: Tampo | null) {
   const r = await criarRecursos(mod);
   const pg = r.doc.addPage([A3.w, A3.h]);
   moldura(pg);
@@ -161,14 +161,24 @@ export async function pdfConjunto(mod: Modelos, d: Divisao, moveis: Movel[], cod
     peso: kg(m.pecas.reduce((a, p) => a + pesoPeca(p), 0) * m.qtd),
     _i: i,
   }));
+  if (tampo?.incluir)
+    linhas.unshift({
+      qtd: "1",
+      designacao: `Tampo de bancada ${comprimentoTampo(tampo, moveis)}x${tampo.profundidade}x${tampo.espessura}mm${tampo.terceiros ? " (terceiros)" : ""}`,
+      codigo: tampo.codigo ?? "",
+      material: `${tampo.material} ${tampo.acabamento}`.trim(),
+      ref: "TB",
+      peso: "",
+      _i: -1,
+    });
   const topoLista = listaMaterial(pg, r, linhas, ZONA.YT - 200);
-  const alc = alcadoConjunto(moveis);
-  const lado = ladoConjunto(moveis);
+  const alc = alcadoConjunto(moveis, tampo);
+  const lado = ladoConjunto(moveis, tampo);
   const gap = 600;
   const vistaEsq = lado ? juntar([alc, deslocar(lado, alc.x1 + gap - lado.x0, 0)]) : alc;
   const s = desenharVista(pg, r, vistaEsq, { x: ZONA.X0 + 15, y: ZONA.YB + 20, w: ZONA.XR - ZONA.X0 - 30, h: ZONA.YT - ZONA.YB - 40 });
   const livre = ZONA.YT - 20 - topoLista;
-  if (livre > 100) desenharVista(pg, r, perspectivaConjunto(moveis), { x: ZONA.XR + 15, y: topoLista + 10, w: ZONA.X1 - ZONA.XR - 30, h: livre - 15 });
+  if (livre > 100) desenharVista(pg, r, perspectivaConjunto(moveis, tampo), { x: ZONA.XR + 15, y: topoLista + 10, w: ZONA.X1 - ZONA.XR - 30, h: livre - 15 });
   legenda(pg, r, {
     codigo: codigoProduto,
     designacao: `${d.designacao} - ${nomeDivisao(d.tipo)}`.toUpperCase(),
@@ -183,4 +193,26 @@ export async function pdfConjunto(mod: Modelos, d: Divisao, moveis: Movel[], cod
     processo: ctx.processo,
   });
   return finalizar(r.doc);
+}
+
+/* ------------------------------------------------------------------ tampo de bancada (peça) */
+
+/** Converte cada troço do tampo numa peça para folha PDF/DXF. */
+export function pecasTampo(t: Tampo, moveis: Movel[]): { peca: Peca; movel: Movel }[] {
+  const comp = comprimentoTampo(t, moveis);
+  const n = Math.max(1, Math.ceil(comp / Math.max(500, t.comp_max_troco)));
+  const espec: EspecMaterial = { material: t.material === "laminado" ? "laminado" : "madeira", mdf: "", acabamento: `${t.material} ${t.acabamento}`.trim(), grupo: "", extra_m2: null };
+  const base = moveis[0];
+  return Array.from({ length: n }, (_, i) => {
+    const c = i < n - 1 ? Math.round(comp / n) : comp - Math.round(comp / n) * (n - 1);
+    const peca: Peca = {
+      id: `tampo-${i}`, designacao: n > 1 ? `Tampo de bancada (troço ${i + 1}/${n})` : "Tampo de bancada", qtd: 1,
+      c, l: t.profundidade, e: t.espessura, sup: "manual", oc: 2, ol: 0, orlas: [true, false, false, false], subconjunto: "",
+      preco_m2: t.preco_m2, preco_extra_m2: null, faces_extra: 0, preco_orla_ml: t.orla_ml,
+      nota: [t.terceiros ? "Fornecido/aplicado por terceiros" : "", t.recortes.map((r) => `${r.qtd}x ${r.descricao}`).join(", "), t.notas].filter(Boolean).join(" · "),
+      codigo: n > 1 ? `${t.codigo ?? "TAMPO"}-${i + 1}` : t.codigo ?? "TAMPO",
+    };
+    const movel: Movel = { ...base, designacao: "Conjunto", codigo: t.codigo, ref: "TB", corpo: espec, frente: espec, pecas: [peca], prateleiras: 0, portas: 0, gavetas: 0, tipo: "outro" };
+    return { peca, movel };
+  });
 }

@@ -1,10 +1,10 @@
 import JSZip from "jszip";
 import type { Divisao } from "../pedido";
-import type { Movel } from "../orcamento";
+import type { Movel, Tampo } from "../orcamento";
 import { codigoProduto } from "../orcamento";
 import { furacao } from "./geometria";
 import { dxfPeca } from "./dxf";
-import { pdfConjunto, pdfMovel, pdfPeca, type Contexto } from "./folhas";
+import { pdfConjunto, pdfMovel, pdfPeca, pecasTampo, type Contexto } from "./folhas";
 import { carregarModelos } from "./pdf";
 
 export type OpcoesPacote = { conjunto: boolean; moveis: boolean; pecasPdf: boolean; pecasDxf: boolean };
@@ -19,6 +19,7 @@ export async function gerarPacote(
   op: OpcoesPacote,
   ctx: Contexto,
   progresso?: (feito: number, total: number) => void,
+  tampos: Record<string, Tampo> = {},
 ) {
   const mod = await carregarModelos();
   const zip = new JSZip();
@@ -33,9 +34,24 @@ export async function gerarPacote(
     const pasta = raiz.folder(seguro(`${String(d.ordem).padStart(2, "0")}_${cod}`))!;
     if (op.conjunto) tarefas.push(async () => {
       const nome = `${cod}.pdf`;
-      pasta.file(nome, await pdfConjunto(mod, d, doProduto, cod, ctx));
+      pasta.file(nome, await pdfConjunto(mod, d, doProduto, cod, ctx, tampos[d.id]));
       lista.push(`${cod}/${nome}`);
     });
+    const t = tampos[d.id];
+    if (t?.incluir) {
+      const pt = pasta.folder("TAMPO")!;
+      for (const { peca, movel } of pecasTampo(t, doProduto)) {
+        const base = seguro(peca.codigo ?? "TAMPO");
+        if (op.pecasPdf) tarefas.push(async () => {
+          pt.file(`${base}.pdf`, await pdfPeca(mod, movel, peca, ctx));
+          lista.push(`${cod}/TAMPO/${base}.pdf`);
+        });
+        if (op.pecasDxf) tarefas.push(async () => {
+          pt.file(`${base}.dxf`, dxfPeca(peca, []));
+          lista.push(`${cod}/TAMPO/${base}.dxf`);
+        });
+      }
+    }
     for (const m of doProduto) {
       const pm = pasta.folder(seguro(m.codigo ?? m.ref))!;
       if (op.moveis) tarefas.push(async () => {

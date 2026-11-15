@@ -7,7 +7,7 @@ import type { Movel } from "../orcamento";
 import { TIPOS_MOVEL } from "../orcamento";
 import { posicoesDobradica } from "./geometria";
 
-export type TipoPainel = "corpo" | "interior" | "costa" | "frente" | "rodape" | "puxador" | "pe" | "dobradica";
+export type TipoPainel = "corpo" | "interior" | "costa" | "frente" | "rodape" | "puxador" | "pe" | "dobradica" | "tampo";
 
 export type Painel = {
   nome: string;

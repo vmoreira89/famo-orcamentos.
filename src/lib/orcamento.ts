@@ -85,7 +85,101 @@ export type Movel = {
   codigo?: string;
 };
 
-export type DadosOrcamento = { moveis: Movel[]; extras_gerais: LinhaExtra[] };
+export type Recorte = { id: string; descricao: string; qtd: number; preco: number | null };
+
+/** Tampo de bancada de uma divisão (elemento do conjunto, sobre os móveis de baixo). */
+export type Tampo = {
+  incluir: boolean;
+  material: "laminado" | "compacto" | "madeira" | "pedra" | "outro";
+  acabamento: string;
+  espessura: number;
+  profundidade: number;
+  saliencia: number; // mm à frente das portas
+  comprimento: number | null; // null = soma automática dos móveis de baixo (sem colunas)
+  comp_max_troco: number; // comprimento máximo de cada troço (placa)
+  terceiros: boolean; // fornecido/aplicado por terceiros (só desenhado, sem custo)
+  preco_m2: number | null;
+  orla_ml: number | null; // preço da orla/remate frontal por ml
+  minutos: number; // mão de obra (corte, orla, ajuste)
+  recortes: Recorte[];
+  notas: string;
+  codigo?: string;
+};
+
+export type DadosOrcamento = { moveis: Movel[]; extras_gerais: LinhaExtra[]; tampos?: Record<string, Tampo> };
+
+export function tampoPorDefeito(d: Divisao, moveis: Movel[]): Tampo {
+  const txt = (d.descritivo?.tampo ?? "").toLowerCase();
+  const esp = parseInt(txt.match(/(\d{2})\s*mm/)?.[1] ?? "", 10);
+  const material: Tampo["material"] = txt.includes("compacto") ? "compacto" : txt.includes("pedra") || txt.includes("granito") || txt.includes("quartz") || txt.includes("silestone") ? "pedra" : txt.includes("madeira") ? "madeira" : "laminado";
+  const baixo = moveis.filter((m) => m.divisao_id === d.id && m.tipo !== "superior" && m.tipo !== "coluna");
+  const P = Math.max(560, ...baixo.map((m) => m.P));
+  return {
+    incluir: true,
+    material,
+    acabamento: d.descritivo?.acabamento_ref ?? "",
+    espessura: Number.isFinite(esp) ? esp : material === "compacto" ? 12 : material === "pedra" ? 20 : 38,
+    profundidade: P + 19 + 2 + 20,
+    saliencia: 20,
+    comprimento: null,
+    comp_max_troco: material === "pedra" ? 3000 : 4100,
+    terceiros: material === "pedra",
+    preco_m2: null,
+    orla_ml: null,
+    minutos: 30,
+    recortes: [],
+    notas: d.descritivo?.tampo ?? "",
+  };
+}
+
+/** Troços contínuos de móveis de baixo (as colunas e os espaços interrompem o tampo). */
+export function trocosTampo(moveis: Movel[]): { x: number; comp: number }[] {
+  const out: { x: number; comp: number }[] = [];
+  let x = 0;
+  let atual: { x: number; comp: number } | null = null;
+  for (const m of moveis.filter((mm) => mm.tipo !== "superior")) {
+    const esp = m.espaco_antes ?? 0;
+    if (esp > 0 && atual) { out.push(atual); atual = null; }
+    x += esp;
+    for (let i = 0; i < m.qtd; i++) {
+      if (m.tipo === "coluna") {
+        if (atual) { out.push(atual); atual = null; }
+      } else {
+        if (!atual) atual = { x, comp: 0 };
+        atual.comp += m.L;
+      }
+      x += m.L;
+    }
+  }
+  if (atual) out.push(atual);
+  return out;
+}
+
+export function comprimentoTampo(t: Tampo, moveis: Movel[]) {
+  return t.comprimento ?? trocosTampo(moveis).reduce((s, tr) => s + tr.comp, 0);
+}
+
+export type CustoTampo = { comprimento: number; area_m2: number; pecas: number; material: number; orla: number; desperdicio: number; recortes: number; mao_obra: number; total: number; pendentes: number };
+
+export function custoTampo(t: Tampo, moveis: Movel[], par: Parametros): CustoTampo {
+  const comp = comprimentoTampo(t, moveis);
+  const trocos = t.comprimento != null ? [{ comp }] : trocosTampo(moveis);
+  const pecas = trocos.reduce((s, tr) => s + Math.max(1, Math.ceil(tr.comp / Math.max(500, t.comp_max_troco))), 0);
+  const area = (comp * t.profundidade) / 1e6;
+  if (!t.incluir || t.terceiros) return { comprimento: comp, area_m2: r2(area), pecas, material: 0, orla: 0, desperdicio: 0, recortes: 0, mao_obra: 0, total: 0, pendentes: 0 };
+  let pend = 0;
+  const material = t.preco_m2 == null ? (pend++, 0) : area * t.preco_m2;
+  const orla = t.orla_ml == null ? 0 : (comp / 1000) * t.orla_ml;
+  const desperdicio = (material + orla) * (par.desperdicio_pct / 100);
+  let recortes = 0;
+  for (const rc of t.recortes) {
+    if (rc.preco == null) pend++;
+    else recortes += rc.qtd * rc.preco;
+  }
+  const mao = t.minutos * par.custo_minuto;
+  const total = material + orla + desperdicio + recortes + mao;
+  return { comprimento: comp, area_m2: r2(area), pecas, material: r2(material), orla: r2(orla), desperdicio: r2(desperdicio), recortes: r2(recortes), mao_obra: r2(mao), total: r2(total), pendentes: pend };
+}
 
 export type Parametros = { custo_minuto: number; desperdicio_pct: number; orla_preco_ml: number };
 
@@ -479,6 +573,7 @@ export function custoMovel(m: Movel, par: Parametros): CustoMovel {
 export type Totais = {
   porMovel: Record<string, CustoMovel>;
   porDivisao: Record<string, { custo: number; preco: number; qtd: number }>;
+  porTampo: Record<string, CustoTampo>;
   extrasGerais: number;
   custo: number;
   preco: number;
@@ -496,6 +591,15 @@ export function calcularTotais(dados: DadosOrcamento, divisoes: Divisao[], par: 
     pend += c.pendentes;
     if (porDivisao[m.divisao_id]) porDivisao[m.divisao_id].custo += c.total * m.qtd;
   }
+  const porTampo: Record<string, CustoTampo> = {};
+  for (const d of divisoes) {
+    const t = dados.tampos?.[d.id];
+    if (!t?.incluir) continue;
+    const ct = custoTampo(t, dados.moveis.filter((m) => m.divisao_id === d.id), par);
+    porTampo[d.id] = ct;
+    pend += ct.pendentes;
+    porDivisao[d.id].custo += ct.total;
+  }
   let custo = 0;
   for (const d of divisoes) {
     const pd = porDivisao[d.id];
@@ -509,7 +613,7 @@ export function calcularTotais(dados: DadosOrcamento, divisoes: Divisao[], par: 
     else extrasGerais += x.valor;
   }
   custo += extrasGerais;
-  return { porMovel, porDivisao, extrasGerais: r2(extrasGerais), custo: r2(custo), preco: r2(custo * (1 + margem / 100)), pendentes: pend };
+  return { porMovel, porDivisao, porTampo, extrasGerais: r2(extrasGerais), custo: r2(custo), preco: r2(custo * (1 + margem / 100)), pendentes: pend };
 }
 
 export const euro = (n: number | null | undefined) =>

@@ -2,7 +2,8 @@
  * Vistas de móveis e conjuntos a partir do modelo 3D por painéis:
  * frente, lado (vista da esquerda, 1.º diedro), topo e perspectiva isométrica.
  */
-import type { Movel } from "../orcamento";
+import type { Movel, Tampo } from "../orcamento";
+import { trocosTampo } from "../orcamento";
 import { limites, rect, type Entidade, type Vista } from "./geometria";
 import { alturaPes, frentesDoMovel, iso, modelo3d, profundidadeVista, type Painel } from "./modelo3d";
 
@@ -250,7 +251,27 @@ export function disposicao(moveis: Movel[]) {
   return out;
 }
 
-export function alcadoConjunto(moveis: Movel[]): Vista {
+/** Painéis do tampo de bancada (um por troço contínuo de móveis de baixo). */
+export function paineisTampo(moveis: Movel[], t?: Tampo | null): PainelMundo[] {
+  if (!t?.incluir) return [];
+  const baixo = moveis.filter((m) => m.tipo !== "superior" && m.tipo !== "coluna");
+  if (!baixo.length) return [];
+  const yBase = Math.max(...baixo.map((m) => alturaPes(m) + m.A));
+  const trocos = t.comprimento != null ? [{ x: trocosTampo(moveis)[0]?.x ?? 0, comp: t.comprimento }] : trocosTampo(moveis);
+  return trocos.map((tr, i) => ({
+    nome: `Tampo ${i + 1}`,
+    tipo: "tampo" as const,
+    x: tr.x,
+    y: yBase,
+    z: -(E + 2 + t.saliencia),
+    w: tr.comp,
+    h: t.espessura,
+    d: t.profundidade,
+    ref: t.codigo,
+  }));
+}
+
+export function alcadoConjunto(moveis: Movel[], tampo?: Tampo | null): Vista {
   const lista = disposicao(moveis);
   const ents: Entidade[] = [];
   let maxX = 0, maxY = 0;
@@ -259,6 +280,13 @@ export function alcadoConjunto(moveis: Movel[]): Vista {
     ents.push({ t: "texto", x: x + m.L / 2, y: y + alturaPes(m) + 25, txt: m.ref, alt: 35, centro: true });
     maxX = Math.max(maxX, x + m.L);
     maxY = Math.max(maxY, y + m.A + alturaPes(m));
+  }
+  for (const tp of paineisTampo(moveis, tampo)) {
+    ents.push(...rect(tp.x, tp.y, tp.w, tp.h));
+    ents.push({ t: "texto", x: tp.x + tp.w / 2, y: tp.y + tp.h + 25, txt: `TAMPO ${tampo!.espessura}mm`, alt: 30, centro: true });
+    ents.push({ t: "cota", x1: tp.x + tp.w, y1: tp.y, x2: tp.x + tp.w, y2: tp.y + tp.h, off: 60 });
+    ents.push({ t: "cota", x1: tp.x, y1: tp.y + tp.h, x2: tp.x + tp.w, y2: tp.y + tp.h, off: 90 });
+    maxY = Math.max(maxY, tp.y + tp.h);
   }
   ents.push({ t: "linha", x1: -150, y1: 0, x2: maxX + 150, y2: 0, fina: true });
   ents.push({ t: "cota", x1: 0, y1: maxY, x2: maxX, y2: maxY, off: 260 });
@@ -269,14 +297,15 @@ export function alcadoConjunto(moveis: Movel[]): Vista {
     for (const { m, x } of cima) ents.push({ t: "cota", x1: x, y1: topoCima, x2: x + m.L, y2: topoCima, off: 130 });
   }
   // cadeia de alturas à esquerda
-  const alturas = [...new Set([0, ...lista.flatMap(({ m, y }) => [y, y + alturaPes(m), y + alturaPes(m) + m.A])])].sort((a, b) => a - b);
+  const topoTampo = paineisTampo(moveis, tampo).map((tp) => tp.y + tp.h);
+  const alturas = [...new Set([0, ...topoTampo, ...lista.flatMap(({ m, y }) => [y, y + alturaPes(m), y + alturaPes(m) + m.A])])].sort((a, b) => a - b);
   for (let i = 0; i < alturas.length - 1; i++) if (alturas[i + 1] - alturas[i] > 20) ents.push({ t: "cota", x1: 0, y1: alturas[i], x2: 0, y2: alturas[i + 1], off: -150 });
   ents.push({ t: "cota", x1: 0, y1: 0, x2: 0, y2: maxY, off: -300 });
   return limites(ents);
 }
 
 /** Corte lateral do conjunto: perfis do primeiro inferior e do primeiro superior, encostados à parede. */
-export function ladoConjunto(moveis: Movel[]): Vista | null {
+export function ladoConjunto(moveis: Movel[], tampo?: Tampo | null): Vista | null {
   const lista = disposicao(moveis);
   const fundo = Math.max(...lista.map((a) => a.m.P));
   const ents: Entidade[] = [];
@@ -289,14 +318,26 @@ export function ladoConjunto(moveis: Movel[]): Vista | null {
     const H = y + alturaPes(m) + m.A;
     ents.push({ t: "cota", x1: 0, y1: H, x2: m.P, y2: H, off: 40 });
   }
+  const tps = paineisTampo(moveis, tampo);
+  if (tps.length) {
+    const inf = lista.find((a) => a.m.tipo !== "superior" && a.m.tipo !== "coluna")?.m;
+    if (inf) {
+      const tp = tps[0];
+      const h0 = inf.P - (tp.z + tp.d);
+      ents.push(...rect(h0, tp.y, tp.d, tp.h));
+      ents.push({ t: "cota", x1: h0, y1: tp.y + tp.h, x2: h0 + tp.d, y2: tp.y + tp.h, off: 80 });
+    }
+  }
   if (!ents.length) return null;
   ents.push({ t: "linha", x1: -8, y1: -60, x2: -8, y2: 2400, fina: true }); // parede
   ents.push({ t: "linha", x1: -100, y1: 0, x2: fundo + 200, y2: 0, fina: true });
   return limites(ents);
 }
 
-export function perspectivaConjunto(moveis: Movel[]): Vista {
+export function perspectivaConjunto(moveis: Movel[], tampo?: Tampo | null): Vista {
   const disp = disposicao(moveis);
   const fundo = Math.max(...disp.map((d) => d.m.P));
-  return vistaIso(disp.flatMap(({ m, x, y }) => paineisMundo(m, x, y, fundo - m.P)));
+  const pInf = Math.max(...disp.filter((d) => d.m.tipo !== "superior" && d.m.tipo !== "coluna").map((d) => d.m.P), fundo);
+  const tampos = paineisTampo(moveis, tampo).map((p) => ({ ...p, z: p.z + (fundo - pInf) }));
+  return vistaIso([...disp.flatMap(({ m, x, y }) => paineisMundo(m, x, y, fundo - m.P)), ...tampos]);
 }

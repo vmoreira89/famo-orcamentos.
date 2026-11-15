@@ -19,12 +19,15 @@ import {
   euro,
   novoMovel,
   proporMoveis,
+  tampoPorDefeito,
+  trocosTampo,
   uid,
   type Catalogo,
   type DadosOrcamento,
   type EspecMaterial,
   type Movel,
   type Parametros,
+  type Tampo,
   type TipoMovel,
 } from "@/lib/orcamento";
 import DialogoMotivo from "@/components/DialogoMotivo";
@@ -75,7 +78,7 @@ export default function EditorOrcamento() {
     setDecors((ac.data as { referencia: string; descricao: string }[]) ?? []);
     const orc = o.data as LinhaOrc | null;
     if (orc) {
-      setDados({ moveis: orc.dados.moveis ?? [], extras_gerais: orc.dados.extras_gerais ?? [] });
+      setDados({ moveis: orc.dados.moveis ?? [], extras_gerais: orc.dados.extras_gerais ?? [], tampos: orc.dados.tampos ?? {} });
       setPar(orc.parametros?.custo_minuto != null ? orc.parametros : c.parametros);
       setMargem(Number(orc.margem_pct));
       setVersao(orc.versao);
@@ -101,6 +104,14 @@ export default function EditorOrcamento() {
     () => (pedido ? codigos(pedido.numero_projecto, divisoes, dados.moveis) : dados.moveis),
     [pedido, divisoes, dados.moveis],
   );
+  const tamposComCodigo = useMemo(() => {
+    const out: Record<string, Tampo> = {};
+    for (const [k, t] of Object.entries(dados.tampos ?? {})) {
+      const d = divisoes.find((x) => x.id === k);
+      out[k] = { ...t, codigo: pedido?.numero_projecto && d ? `03.4.TBY${pedido.numero_projecto.split(".")[0]}.${String(d.ordem).padStart(2, "0")}` : undefined };
+    }
+    return out;
+  }, [dados.tampos, divisoes, pedido]);
   const totais = useMemo(() => (par ? calcularTotais(dados, divisoes, par, margem) : null), [dados, divisoes, par, margem]);
 
   if (erro) return <p className="p-10 text-center text-slate-500">{erro}</p>;
@@ -251,6 +262,16 @@ export default function EditorOrcamento() {
             </div>
             {moveis.length === 0 && <p className="mt-3 text-sm text-slate-400">Ainda sem móveis.</p>}
             {moveis.length > 0 && <MiniAlcado moveis={moveis} activo={aberto} onEscolher={setAberto} />}
+            {moveis.some((m) => m.tipo !== "superior" && m.tipo !== "coluna") && (
+              <CartaoTampo
+                divisao={div}
+                moveis={moveis}
+                tampo={tamposComCodigo[div.id]}
+                custo={totais.porTampo[div.id]}
+                pode={pode}
+                onChange={(t) => alterar((d) => ({ ...d, tampos: { ...(d.tampos ?? {}), [div.id]: t } }))}
+              />
+            )}
             <div className="mt-3 space-y-3">
               {moveis.map((m) => (
                 <CartaoMovel
@@ -306,7 +327,7 @@ export default function EditorOrcamento() {
         motivoPadrao={versao ? "" : "Primeira versão do orçamento"}
         onFechar={() => setGuardar(false)}
         onConfirmar={async (motivo) => {
-          const final = { moveis: moveisComCodigo, extras_gerais: dados.extras_gerais };
+          const final = { moveis: moveisComCodigo, extras_gerais: dados.extras_gerais, tampos: tamposComCodigo };
           const { data, error } = await supabase().rpc("guardar_orcamento", {
             p_pedido: id,
             p_versao: versao,
@@ -336,6 +357,7 @@ export default function EditorOrcamento() {
           versao={versao}
           divisoes={divisoes}
           moveis={moveisComCodigo}
+          tampos={tamposComCodigo}
           autor={perfil.nome || perfil.email}
         />
       )}
@@ -372,6 +394,131 @@ function MiniAlcado({ moveis, activo, onEscolher }: { moveis: Movel[]; activo: s
         })}
       </svg>
     </div>
+  );
+}
+
+/** Pergunta e dados do tampo de bancada da divisão. */
+function CartaoTampo({
+  divisao,
+  moveis,
+  tampo,
+  custo,
+  pode,
+  onChange,
+}: {
+  divisao: Divisao;
+  moveis: Movel[];
+  tampo: Tampo | undefined;
+  custo: ReturnType<typeof calcularTotais>["porTampo"][string] | undefined;
+  pode: boolean;
+  onChange: (t: Tampo) => void;
+}) {
+  if (!tampo)
+    return (
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-md border border-sky-200 bg-sky-50 px-4 py-3 text-sm">
+        <span>
+          <strong>Tampo de bancada:</strong> adicionar como elemento do conjunto?
+          {divisao.descritivo?.tampo && <span className="text-slate-600"> · Pedido do cliente: «{divisao.descritivo.tampo}»</span>}
+        </span>
+        {pode && (
+          <span className="flex gap-2">
+            <button className="btn-primario" onClick={() => onChange(tampoPorDefeito(divisao, moveis))}>Sim</button>
+            <button className="btn-secundario" onClick={() => onChange({ ...tampoPorDefeito(divisao, moveis), incluir: false })}>Não</button>
+          </span>
+        )}
+      </div>
+    );
+  const set = <K extends keyof Tampo>(k: K, v: Tampo[K]) => onChange({ ...tampo, [k]: v });
+  if (!tampo.incluir)
+    return (
+      <div className="mt-3 flex items-center justify-between rounded-md border border-slate-200 bg-white px-4 py-2 text-sm text-slate-600">
+        <span>Sem tampo de bancada neste conjunto.</span>
+        {pode && <button className="text-marca hover:underline" onClick={() => set("incluir", true)}>Adicionar tampo</button>}
+      </div>
+    );
+  const trocos = trocosTampo(moveis);
+  return (
+    <fieldset className={`cartao mt-3 p-4 ${custo?.pendentes ? "border-amber-300" : ""}`}>
+      <legend className="px-1 text-sm font-semibold">
+        Tampo de bancada <span className="font-mono text-xs font-normal text-slate-500">{tampo.codigo}</span>
+      </legend>
+      <div className="grid gap-3 sm:grid-cols-4 lg:grid-cols-8">
+        <Sel l="Material" v={tampo.material} op={["laminado", "compacto", "madeira", "pedra", "outro"]} rot={{ laminado: "Laminado", compacto: "Compacto", madeira: "Madeira", pedra: "Pedra / quartzo", outro: "Outro" }} on={(v) => set("material", v as Tampo["material"])} pode={pode} semVazio />
+        <div className="sm:col-span-2">
+          <label className="rotulo">Acabamento / referência</label>
+          <input className="campo" list="decors" disabled={!pode} value={tampo.acabamento} onChange={(e) => set("acabamento", e.target.value)} />
+        </div>
+        <Num l="Espessura (mm)" v={tampo.espessura} on={(v) => set("espessura", Math.max(4, v))} pode={pode} />
+        <Num l="Profundidade" v={tampo.profundidade} on={(v) => set("profundidade", Math.max(100, v))} pode={pode} />
+        <Num l="Saliência frente" v={tampo.saliencia} on={(v) => set("saliencia", Math.max(0, v))} pode={pode} />
+        <div>
+          <label className="rotulo">Comprimento</label>
+          <input
+            type="number"
+            className="campo"
+            disabled={!pode}
+            placeholder={`auto: ${trocos.reduce((s, t) => s + t.comp, 0)}`}
+            value={tampo.comprimento ?? ""}
+            onChange={(e) => set("comprimento", e.target.value === "" ? null : Number(e.target.value))}
+          />
+        </div>
+        <Num l="Máx. por troço" v={tampo.comp_max_troco} on={(v) => set("comp_max_troco", Math.max(500, v))} pode={pode} />
+      </div>
+      <label className="mt-3 flex items-center gap-2 text-sm">
+        <input type="checkbox" disabled={!pode} checked={tampo.terceiros} onChange={(e) => set("terceiros", e.target.checked)} />
+        Fornecido / aplicado por terceiros (aparece nos desenhos, sem custo no orçamento)
+      </label>
+      {!tampo.terceiros && (
+        <div className="mt-3 grid gap-3 sm:grid-cols-4">
+          <div>
+            <label className="rotulo">Preço (€/m²)</label>
+            <input type="number" step="any" className={`campo ${tampo.preco_m2 == null ? "border-amber-400 bg-amber-50" : ""}`} disabled={!pode} value={tampo.preco_m2 ?? ""} onChange={(e) => set("preco_m2", e.target.value === "" ? null : Number(e.target.value))} />
+          </div>
+          <div>
+            <label className="rotulo">Orla / remate frente (€/ml)</label>
+            <input type="number" step="any" className="campo" disabled={!pode} value={tampo.orla_ml ?? ""} onChange={(e) => set("orla_ml", e.target.value === "" ? null : Number(e.target.value))} />
+          </div>
+          <Num l="Mão de obra (min)" v={tampo.minutos} on={(v) => set("minutos", Math.max(0, v))} pode={pode} />
+        </div>
+      )}
+      <div className="mt-3">
+        <p className="rotulo">Recortes e trabalhos</p>
+        <ul className="space-y-1">
+          {tampo.recortes.map((rc) => (
+            <li key={rc.id} className="flex flex-wrap items-center gap-2 text-sm">
+              {celula(pode, rc.descricao, (v) => set("recortes", tampo.recortes.map((x) => (x.id === rc.id ? { ...x, descricao: v } : x))), "text", "w-64")}
+              {celula(pode, rc.qtd, (v) => set("recortes", tampo.recortes.map((x) => (x.id === rc.id ? { ...x, qtd: Number(v) || 1 } : x))), "number", "w-14")}
+              <span className="text-slate-500">×</span>
+              {celula(pode, rc.preco, (v) => set("recortes", tampo.recortes.map((x) => (x.id === rc.id ? { ...x, preco: numOuNull(v) } : x))), "number", "w-20", rc.preco == null && !tampo.terceiros)}
+              <span className="text-slate-500">€</span>
+              {pode && <button className="text-xs text-rose-700" aria-label="Remover recorte" onClick={() => set("recortes", tampo.recortes.filter((x) => x.id !== rc.id))}>✕</button>}
+            </li>
+          ))}
+        </ul>
+        {pode && (
+          <div className="mt-1 flex flex-wrap gap-3 text-sm">
+            {["Recorte placa", "Recorte lava-loiça", "Furo torneira", "Junta / união"].map((t) => (
+              <button key={t} className="text-marca hover:underline" onClick={() => set("recortes", [...tampo.recortes, { id: uid(), descricao: t, qtd: 1, preco: null }])}>+ {t}</button>
+            ))}
+          </div>
+        )}
+      </div>
+      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+        <div>
+          <label className="rotulo">Notas</label>
+          <input className="campo" disabled={!pode} value={tampo.notas} onChange={(e) => set("notas", e.target.value)} />
+        </div>
+        <div className="flex items-end justify-between gap-2 text-sm">
+          {custo && (
+            <span className="text-slate-600">
+              {custo.comprimento} mm · {custo.area_m2} m² · {custo.pecas} peça(s){trocos.length > 1 && tampo.comprimento == null ? ` em ${trocos.length} troços` : ""} ·{" "}
+              <strong>{tampo.terceiros ? "por terceiros" : euro(custo.total)}</strong>
+            </span>
+          )}
+          {pode && <button className="text-rose-700 hover:underline" onClick={() => set("incluir", false)}>Retirar tampo</button>}
+        </div>
+      </div>
+    </fieldset>
   );
 }
 

@@ -130,6 +130,22 @@ function Relatorio() {
                 </tr>
               </thead>
               <tbody>
+                {(() => {
+                  const t = orc.dados.tampos?.[d.id];
+                  const ct = totais.porTampo?.[d.id];
+                  if (!t?.incluir || !ct) return null;
+                  return (
+                    <tr className="border-b">
+                      <td className="py-1 font-mono text-xs">{t.codigo}</td>
+                      <td>Tampo de bancada {t.material} {t.acabamento}{t.terceiros ? " (por terceiros)" : ""}</td>
+                      <td>{ct.comprimento}×{t.profundidade}×{t.espessura}</td>
+                      <td className="text-right">1</td>
+                      {tipo === "detalhado" && <td className="text-right tabular-nums">{euro(ct.total)}</td>}
+                      <td className="text-right tabular-nums">{t.terceiros ? "—" : euro(comMargem(ct.total))}</td>
+                      <td className="text-right tabular-nums">{t.terceiros ? "—" : euro(comMargem(ct.total))}</td>
+                    </tr>
+                  );
+                })()}
                 {moveis.map((mv) => {
                   const c = totais.porMovel[mv.id];
                   return (
@@ -244,6 +260,9 @@ async function gerarExcel(
       const c = totais.porMovel[mv.id];
       ws.addRow([codigoProduto(pedido.numero_projecto, d), d.designacao, mv.codigo, mv.designacao, mv.L, mv.P, mv.A, mv.qtd, ...(tipo === "detalhado" ? [c.total] : []), cm(c.total), cm(c.total) * mv.qtd]);
     }
+    const t = orc.dados.tampos?.[d.id];
+    const ct = totais.porTampo?.[d.id];
+    if (t?.incluir && ct) ws.addRow([codigoProduto(pedido.numero_projecto, d), d.designacao, t.codigo, `Tampo de bancada ${t.material} ${t.acabamento}${t.terceiros ? " (terceiros)" : ""}`, ct.comprimento, t.profundidade, t.espessura, 1, ...(tipo === "detalhado" ? [ct.total] : []), cm(ct.total), cm(ct.total)]);
     const td = totais.porDivisao[d.id];
     ws.addRow(["", `${d.designacao} — por unidade`, "", "", "", "", "", d.quantidade, ...(tipo === "detalhado" ? [td.custo] : []), td.preco, td.preco * d.quantidade]).font = { bold: true };
   }
