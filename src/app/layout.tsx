@@ -16,7 +16,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className="flex min-h-full flex-col font-sans">
         <Cabecalho />
         <main className="flex-1">{children}</main>
-        <footer className="border-t border-slate-200 py-4 text-center text-xs text-slate-500">
+        <footer className="border-t border-slate-200 py-4 text-center text-xs text-slate-500 print:hidden">
           FAMO · Orçamentação e Desenho Técnico
         </footer>
       </body>

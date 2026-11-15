@@ -540,9 +540,13 @@ const ROTULOS: Record<string, string> = {
   descritivo: "Descritivo",
   acabamento: "Acabamento",
   resolvido: "Aplicado",
+  margem_pct: "Margem %",
+  custo_total: "Custo total",
+  preco_venda: "Preço final",
+  pendentes: "Linhas sem preço",
   revogada_em: "Revogada",
 };
-const IGNORAR = new Set(["updated_at", "created_at", "notificado_em", "ordem"]);
+const IGNORAR = new Set(["updated_at", "created_at", "notificado_em", "ordem", "dados", "parametros", "versao", "calculado_em"]);
 
 function valorLegivel(k: string, v: unknown): string {
   if (v === null || v === undefined || v === "") return "—";
@@ -564,6 +568,7 @@ function descrever(r: Registo): { titulo: string; mudancas: string[] } {
     pedido_ficheiros: { INSERT: `Ficheiro anexado: ${nome}`, UPDATE: `Ficheiro alterado: ${nome}`, DELETE: `Ficheiro retirado: ${nome}` },
     comentarios: { INSERT: "Comentário adicionado", UPDATE: "Comentário actualizado", DELETE: "Comentário apagado" },
     autorizacoes: { INSERT: "Autorização de edição concedida", UPDATE: "Autorização alterada", DELETE: "Autorização apagada" },
+    orcamentos: { INSERT: "Orçamento guardado (1.ª versão)", UPDATE: `Orçamento guardado (versão ${r.depois?.versao ?? "?"})`, DELETE: "Orçamento apagado" },
   };
   const titulo = t[r.tabela]?.[r.accao] ?? `${r.tabela} ${r.accao}`;
   const mudancas: string[] = [];

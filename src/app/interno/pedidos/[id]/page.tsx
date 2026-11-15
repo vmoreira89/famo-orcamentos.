@@ -109,6 +109,11 @@ export default function DetalhePedido() {
         </div>
 
         <div className="flex flex-wrap gap-2">
+          {pedido.numero_projecto && (
+            <Link href={`/interno/pedidos/${pedido.id}/orcamento`} className="btn-primario">
+              Orçamento
+            </Link>
+          )}
           {pedido.estado === "novo" && eOrc && (
             <button className="btn-primario" onClick={() => { setNumero(""); setDialogo("iniciar"); }}>
               Iniciar orçamento

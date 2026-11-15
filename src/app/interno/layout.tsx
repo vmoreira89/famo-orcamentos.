@@ -63,7 +63,7 @@ export default function LayoutInterno({ children }: { children: React.ReactNode 
 
   return (
     <ContextoInterno value={perfil}>
-      <div className="border-b border-slate-200 bg-white">
+      <div className="border-b border-slate-200 bg-white print:hidden">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-2 px-4">
           <nav className="-mb-px flex gap-1 overflow-x-auto">
             {separadores.map((s) => (
