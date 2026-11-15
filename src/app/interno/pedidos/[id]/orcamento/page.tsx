@@ -486,15 +486,22 @@ function CartaoTampo({
             {tampo.material === "laminado" && (
               <Sel l="Grupo (se o decor não tiver)" v={tampo.grupo ?? ""} op={Array.from(new Set(cat.gruposPreco.map((g) => g.grupo))).filter(Boolean).sort()} on={(v) => set("grupo", v)} pode={pode} />
             )}
-            <Num l="Espessura (mm)" v={tampo.espessura} on={(v) => set("espessura", Math.max(4, v))} pode={pode} />
-            <Num l="Profundidade" v={tampo.profundidade} on={(v) => set("profundidade", Math.max(100, v))} pode={pode} />
-            <Num l="Saliência frente" v={tampo.saliencia} on={(v) => set("saliencia", Math.max(0, v))} pode={pode} />
+            <Num l="Espessura (mm)" v={tampo.espessura} on={(v) => set("espessura", v)} pode={pode} />
+            <Num l="Profundidade" v={tampo.profundidade} on={(v) => set("profundidade", v)} pode={pode} />
+            <Num l="Saliência frente" v={tampo.saliencia} on={(v) => set("saliencia", v)} pode={pode} />
             <div>
               <label className="rotulo">Comprimento</label>
               <input type="number" className="campo" disabled={!pode} placeholder={`auto: ${trocos.reduce((s, t) => s + t.comp, 0)}`} value={tampo.comprimento ?? ""} onChange={(e) => set("comprimento", e.target.value === "" ? null : Number(e.target.value))} />
             </div>
-            <Num l="Máx. por peça" v={tampo.comp_max_troco} on={(v) => set("comp_max_troco", Math.max(500, v))} pode={pode} />
+            <div>
+              <label className="rotulo" title="Comprimento máximo de cada peça (placa). Só se aplica se não for tampo único.">Máx. por peça</label>
+              <input type="number" className="campo" disabled={!pode || tampo.unico} value={tampo.comp_max_troco || ""} onChange={(e) => set("comp_max_troco", Number(e.target.value))} />
+            </div>
           </div>
+          <label className="mt-3 flex items-center gap-2 text-sm">
+            <input type="checkbox" disabled={!pode} checked={!!tampo.unico} onChange={(e) => set("unico", e.target.checked)} />
+            <strong>Tampo único</strong>: uma só peça à medida dos móveis de baixo (sem divisões). Desmarque para dividir em peças até ao «Máx. por peça».
+          </label>
           <div className="mt-3 grid gap-3 sm:grid-cols-4">
             <div>
               <label className="rotulo">Preço da placa (€/m²)</label>
@@ -902,7 +909,7 @@ function Num({ l, v, on, pode }: { l: string; v: number; on: (v: number) => void
   return (
     <div>
       <label className="rotulo">{l}</label>
-      <input type="number" className="campo" disabled={!pode} value={v} onChange={(e) => on(Number(e.target.value))} />
+      <input type="number" className="campo" disabled={!pode} value={Number.isFinite(v) && v !== 0 ? v : v === 0 ? 0 : ""} onChange={(e) => on(e.target.value === "" ? 0 : Number(e.target.value))} />
     </div>
   );
 }

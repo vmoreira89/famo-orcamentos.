@@ -96,7 +96,8 @@ export type Tampo = {
   profundidade: number;
   saliencia: number; // mm à frente das portas
   comprimento: number | null; // null = soma automática dos móveis de baixo (sem colunas)
-  comp_max_troco: number; // comprimento máximo de cada troço (placa)
+  comp_max_troco: number; // comprimento máximo de cada peça (placa)
+  unico?: boolean; // tampo único: uma só peça por troço, sem divisões
   terceiros: boolean; // fornecido/aplicado por terceiros (só desenhado, sem custo)
   preco_m2: number | null; // guardado no orçamento (lido da base de dados ou manual)
   preco_orla_ml?: number | null;
@@ -122,6 +123,7 @@ export function tampoPorDefeito(d: Divisao, moveis: Movel[], cat?: Catalogo): Ta
     saliencia: 20,
     comprimento: null,
     comp_max_troco: material === "pedra" ? 3000 : 4100,
+    unico: true,
     terceiros: material === "pedra",
     preco_m2: null,
     preco_orla_ml: null,
@@ -183,7 +185,7 @@ export function movelTampo(t: Tampo, d: Divisao, moveis: Movel[], numero: string
   const espec: EspecMaterial = { material: t.material === "laminado" ? "laminado" : "madeira", mdf: "", acabamento: t.acabamento, grupo: t.grupo ?? "", extra_m2: null };
   const pecas: Peca[] = [];
   for (const tr of trocos) {
-    const n = Math.max(1, Math.ceil(tr.comp / Math.max(500, t.comp_max_troco)));
+    const n = t.unico ? 1 : Math.max(1, Math.ceil(tr.comp / Math.max(500, t.comp_max_troco || 4100)));
     for (let i = 0; i < n; i++) {
       const c = i < n - 1 ? Math.round(tr.comp / n) : tr.comp - Math.round(tr.comp / n) * (n - 1);
       seq++;

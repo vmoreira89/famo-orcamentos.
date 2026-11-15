@@ -5,6 +5,7 @@ import { arestasOrla, movelTampo, type EspecMaterial, type Movel, type Peca, typ
 import { deslocar, furacao, juntar, legendaFuros, vistaPeca } from "./geometria";
 import {
   alcadoConjunto,
+  alvosConjunto,
   alvosIso,
   baloes,
   ladoConjunto,
@@ -157,7 +158,8 @@ export async function pdfConjunto(mod: Modelos, d: Divisao, moveis: Movel[], cod
     designacao: `${m.designacao} ${m.L}x${m.P}x${m.A}mm`,
     codigo: m.codigo ?? m.ref,
     material: descMaterial(m.corpo, 19),
-    ref: m.ref,
+    ref: String(i + 1),
+    _movel: m.ref,
     peso: kg(m.pecas.reduce((a, p) => a + pesoPeca(p), 0) * m.qtd),
     _i: i,
   }));
@@ -169,7 +171,8 @@ export async function pdfConjunto(mod: Modelos, d: Divisao, moveis: Movel[], cod
       designacao: `Tampo de bancada ${mt.L}x${mt.P}x${mt.A}mm${tampo.terceiros ? " (terceiros)" : ""}`,
       codigo: mt.codigo ?? "",
       material: descMaterial(mt.corpo, mt.A),
-      ref: mt.ref,
+      ref: String(moveis.length + 1),
+      _movel: "TB01",
       peso: kg(mt.pecas.reduce((a, p) => a + pesoPeca(p), 0)),
       _i: -1,
     });
@@ -181,7 +184,8 @@ export async function pdfConjunto(mod: Modelos, d: Divisao, moveis: Movel[], cod
   const vistaEsq = lado ? juntar([alc, deslocar(lado, alc.x1 + gap - lado.x0, 0)]) : alc;
   const s = desenharVista(pg, r, vistaEsq, { x: ZONA.X0 + 15, y: ZONA.YB + 20, w: ZONA.XR - ZONA.X0 - 30, h: ZONA.YT - ZONA.YB - 40 });
   const livre = ZONA.YT - 20 - topoLista;
-  if (livre > 100) desenharVista(pg, r, perspectivaConjunto(moveis, tampo), { x: ZONA.XR + 15, y: topoLista + 10, w: ZONA.X1 - ZONA.XR - 30, h: livre - 15 });
+  const numeros = Object.fromEntries(linhas.map((l) => [l._movel, l.ref]));
+  if (livre > 100) desenharVista(pg, r, baloes(perspectivaConjunto(moveis, tampo), alvosConjunto(moveis, tampo, numeros)), { x: ZONA.XR + 10, y: topoLista + 8, w: ZONA.X1 - ZONA.XR - 20, h: livre - 10 });
   legenda(pg, r, {
     codigo: codigoProduto,
     designacao: `${d.designacao} - ${nomeDivisao(d.tipo)}`.toUpperCase(),

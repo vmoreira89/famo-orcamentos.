@@ -136,15 +136,36 @@ export function paineisMundo(m: Movel, dx = 0, dy = 0, dz = 0): PainelMundo[] {
  * Câmara em +x, +y, −z: uma caixa está "atrás" de outra se estiver separada dela para trás (z),
  * para baixo (y) ou para a esquerda (x). Só se comparam caixas cujas projecções se sobrepõem.
  */
+type P2 = [number, number];
+/** Invólucro convexo (cadeia monótona). */
+function casco(pts: P2[]): P2[] {
+  const p = [...pts].sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const cr = (o: P2, a: P2, b: P2) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const lo: P2[] = [], hi: P2[] = [];
+  for (const q of p) { while (lo.length >= 2 && cr(lo[lo.length - 2], lo[lo.length - 1], q) <= 0) lo.pop(); lo.push(q); }
+  for (const q of [...p].reverse()) { while (hi.length >= 2 && cr(hi[hi.length - 2], hi[hi.length - 1], q) <= 0) hi.pop(); hi.push(q); }
+  return [...lo.slice(0, -1), ...hi.slice(0, -1)];
+}
+/** Os dois polígonos convexos sobrepõem-se com área (teorema do eixo separador)? */
+function sobrepoem(a: P2[], b: P2[]): boolean {
+  for (const pol of [a, b])
+    for (let i = 0; i < pol.length; i++) {
+      const [x1, y1] = pol[i], [x2, y2] = pol[(i + 1) % pol.length];
+      const nx = y2 - y1, ny = x1 - x2;
+      const proj = (q: P2[]) => q.map(([x, y]) => x * nx + y * ny);
+      const pa = proj(a), pb = proj(b);
+      const tol = 1e-6 * Math.hypot(nx, ny) * 1000;
+      if (Math.max(...pa) <= Math.min(...pb) + tol || Math.max(...pb) <= Math.min(...pa) + tol) return false;
+    }
+  return true;
+}
+
 function ordemPintor(ps: PainelMundo[]): PainelMundo[] {
   const n = ps.length;
-  const caixa2d = ps.map((p) => {
-    const pts = [
-      iso(p.x, p.y, p.z), iso(p.x + p.w, p.y, p.z), iso(p.x, p.y + p.h, p.z), iso(p.x, p.y, p.z + p.d),
-      iso(p.x + p.w, p.y + p.h, p.z), iso(p.x + p.w, p.y, p.z + p.d), iso(p.x, p.y + p.h, p.z + p.d), iso(p.x + p.w, p.y + p.h, p.z + p.d),
-    ];
-    return { x0: Math.min(...pts.map((q) => q[0])), x1: Math.max(...pts.map((q) => q[0])), y0: Math.min(...pts.map((q) => q[1])), y1: Math.max(...pts.map((q) => q[1])) };
-  });
+  const cascos = ps.map((p) => casco([
+    iso(p.x, p.y, p.z), iso(p.x + p.w, p.y, p.z), iso(p.x, p.y + p.h, p.z), iso(p.x, p.y, p.z + p.d),
+    iso(p.x + p.w, p.y + p.h, p.z), iso(p.x + p.w, p.y, p.z + p.d), iso(p.x, p.y + p.h, p.z + p.d), iso(p.x + p.w, p.y + p.h, p.z + p.d),
+  ]));
   const atras = (a: PainelMundo, b: PainelMundo): number => {
     const t = 0.01;
     if (a.z >= b.z + b.d - t) return 1; // a atrás de b
@@ -159,8 +180,7 @@ function ordemPintor(ps: PainelMundo[]): PainelMundo[] {
   const grau = new Array(n).fill(0);
   for (let i = 0; i < n; i++)
     for (let j = i + 1; j < n; j++) {
-      const A = caixa2d[i], B = caixa2d[j];
-      if (A.x1 <= B.x0 || B.x1 <= A.x0 || A.y1 <= B.y0 || B.y1 <= A.y0) continue;
+      if (!sobrepoem(cascos[i], cascos[j])) continue;
       const c = atras(ps[i], ps[j]);
       if (c > 0) { antes[i].push(j); grau[j]++; }
       else if (c < 0) { antes[j].push(i); grau[i]++; }
@@ -342,6 +362,27 @@ export function ladoConjunto(moveis: Movel[], tampo?: Tampo | null): Vista | nul
   ents.push({ t: "linha", x1: -8, y1: -60, x2: -8, y2: 2400, fina: true }); // parede
   ents.push({ t: "linha", x1: -100, y1: 0, x2: fundo + 200, y2: 0, fina: true });
   return limites(ents);
+}
+
+/** Pontos de chamada dos produtos 10* na perspectiva do conjunto (frente de cada móvel e topo do tampo). */
+export function alvosConjunto(moveis: Movel[], tampo: Tampo | null | undefined, numeros: Record<string, string>) {
+  const disp = disposicao(moveis);
+  const fundo = Math.max(...disp.map((d) => d.m.P));
+  const out: { n: string; x: number; y: number }[] = [];
+  const vistos = new Set<string>();
+  for (const { m, x, y } of disp) {
+    if (vistos.has(m.id) || !numeros[m.ref]) continue;
+    vistos.add(m.id);
+    const [px, py] = iso(x + m.L * 0.5, y + alturaPes(m) + m.A * 0.45, fundo - m.P - E - 2);
+    out.push({ n: numeros[m.ref], x: px, y: py });
+  }
+  const tp = paineisTampo(moveis, tampo)[0];
+  if (tp && numeros["TB01"]) {
+    const pInf = Math.max(...disp.filter((d) => d.m.tipo !== "superior" && d.m.tipo !== "coluna").map((d) => d.m.P), fundo);
+    const [px, py] = iso(tp.x + tp.w * 0.5, tp.y + tp.h, tp.z + (fundo - pInf) + tp.d * 0.5);
+    out.push({ n: numeros["TB01"], x: px, y: py });
+  }
+  return out;
 }
 
 export function perspectivaConjunto(moveis: Movel[], tampo?: Tampo | null): Vista {

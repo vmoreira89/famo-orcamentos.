@@ -73,16 +73,22 @@ export function modelo3d(m: Movel): Painel[] {
   const ps: Painel[] = [];
   if (m.tipo === "tampo") return [{ nome: "Tampo", tipo: "tampo", x: 0, y: 0, z: 0, w: L, h: A, d: P, ref: m.pecas[0]?.codigo }];
   const ref = (nome: string) => m.pecas.find((p) => p.designacao.toLowerCase().startsWith(nome.toLowerCase()))?.codigo;
-  ps.push({ nome: "Lado esquerdo", tipo: "corpo", x: 0, y: y0, z: 0, w: E, h: A, d: P, ref: ref("Lado esquerdo") });
-  ps.push({ nome: "Lado direito", tipo: "corpo", x: L - E, y: y0, z: 0, w: E, h: A, d: P, ref: ref("Lado direito") });
-  ps.push({ nome: "Fundo", tipo: "corpo", x: E, y: y0, z: 0, w: L - 2 * E, h: E, d: P, ref: ref("Fundo") });
+  // costa aplicada (por trás, a toda a medida) ou encastrada (entre lados, fundo e cúpula)
+  const aplicada = ec > 0 && (m.checklist.costa ?? "").toLowerCase().startsWith("aplicada");
+  const Pc = aplicada ? P - ec : P; // profundidade dos painéis do corpo
+  ps.push({ nome: "Lado esquerdo", tipo: "corpo", x: 0, y: y0, z: 0, w: E, h: A, d: Pc, ref: ref("Lado esquerdo") });
+  ps.push({ nome: "Lado direito", tipo: "corpo", x: L - E, y: y0, z: 0, w: E, h: A, d: Pc, ref: ref("Lado direito") });
+  ps.push({ nome: "Fundo", tipo: "corpo", x: E, y: y0, z: 0, w: L - 2 * E, h: E, d: Pc, ref: ref("Fundo") });
   if (m.tipo === "inferior" || m.tipo === "gaveteiro") {
     ps.push({ nome: "Travessa frente", tipo: "corpo", x: E, y: y0 + A - E, z: 0, w: L - 2 * E, h: E, d: 100, ref: ref("Travessa") });
-    ps.push({ nome: "Travessa trás", tipo: "corpo", x: E, y: y0 + A - E, z: P - ec - 100, w: L - 2 * E, h: E, d: 100, ref: ref("Travessa") });
+    ps.push({ nome: "Travessa trás", tipo: "corpo", x: E, y: y0 + A - E, z: Pc - (aplicada ? 0 : ec) - 100, w: L - 2 * E, h: E, d: 100, ref: ref("Travessa") });
   } else {
-    ps.push({ nome: "Cúpula", tipo: "corpo", x: E, y: y0 + A - E, z: 0, w: L - 2 * E, h: E, d: P, ref: ref("Cúpula") });
+    ps.push({ nome: "Cúpula", tipo: "corpo", x: E, y: y0 + A - E, z: 0, w: L - 2 * E, h: E, d: Pc, ref: ref("Cúpula") });
   }
-  if (ec > 0) ps.push({ nome: "Costa", tipo: "costa", x: E - 8, y: y0 + E - 8, z: P - ec, w: L - 2 * E + 16, h: A - 2 * E + 16, d: ec, ref: ref("Costa") });
+  if (ec > 0) {
+    if (aplicada) ps.push({ nome: "Costa", tipo: "costa", x: 0, y: y0, z: P - ec, w: L, h: A, d: ec, ref: ref("Costa") });
+    else ps.push({ nome: "Costa", tipo: "costa", x: E, y: y0 + E, z: P - ec, w: L - 2 * E, h: A - 2 * E, d: ec, ref: ref("Costa") });
+  }
   for (let i = 1; i <= m.prateleiras; i++) {
     const y = y0 + E + ((A - 2 * E) * i) / (m.prateleiras + 1);
     ps.push({ nome: "Prateleira", tipo: "interior", x: E + 1, y: y - E / 2, z: 20, w: L - 2 * E - 2, h: E, d: P - 20 - ec, ref: ref("Prateleira") });
