@@ -32,9 +32,14 @@ export function entidadesFrente(m: Movel, dx = 0, dy = 0): Entidade[] {
   ents.push({ t: "linha", x1: xb, y1: dy + y0 + E, x2: xb, y2: dy + y0 + m.A - E, ...esc });
   ents.push({ t: "linha", x1: xa, y1: dy + y0 + E, x2: xb, y2: dy + y0 + E, ...esc });
   ents.push({ t: "linha", x1: xa, y1: dy + y0 + m.A - E, x2: xb, y2: dy + y0 + m.A - E, ...esc });
-  for (const p of ps.filter((x) => x.tipo === "interior")) ents.push(...r(p.x, p.y, p.w, p.h, esc));
-  // dobradiças (símbolo) e frentes
-  for (const p of ps.filter((x) => x.tipo === "dobradica")) ents.push(...r(p.x + 10, p.y + 8, 30, 24, { fina: true }));
+  for (const p of ps.filter((x) => x.tipo === "interior" || x.tipo === "gaveta" || x.tipo === "corredica")) ents.push(...r(p.x, p.y, p.w, p.h, esc));
+  // dobradiças: base no lado e copa Ø35 na porta (a 22,5 mm da aresta)
+  for (const p of ps.filter((x) => x.tipo === "dobradica")) {
+    ents.push(...r(p.x + 10, p.y + 8, 30, 24, { fina: true }));
+    const esq = p.x < m.L / 2;
+    const [cx, cy] = T(esq ? 3 + 22.5 : m.L - 3 - 22.5, p.y + 20);
+    ents.push({ t: "circulo", x: cx, y: cy, r: 17.5 });
+  }
   for (const p of ps.filter(visivelNaFrente)) {
     if (p.tipo === "puxador") {
       const [a, b] = T(p.x, p.y);
@@ -85,7 +90,7 @@ export function entidadesLado(m: Movel, dx = 0, dy = 0): Entidade[] {
   const r = (x: number, y: number, w: number, h: number, extra: Partial<{ tracejado: boolean; fina: boolean }> = {}) => rect(x + dx, y + dy, w, h, extra);
   ents.push(...r(0, y0, P, m.A)); // lado esquerdo
   for (const p of ps) {
-    if (p.tipo === "costa" || p.tipo === "interior" || (p.tipo === "corpo" && p.nome !== "Lado esquerdo" && p.nome !== "Lado direito"))
+    if (p.tipo === "costa" || p.tipo === "interior" || p.tipo === "gaveta" || p.tipo === "corredica" || (p.tipo === "corpo" && p.nome !== "Lado esquerdo" && p.nome !== "Lado direito"))
       ents.push(...r(H(p), p.y, p.d, p.h, { tracejado: true, fina: true }));
     else if (p.tipo === "frente") ents.push(...r(H(p), p.y, p.d, p.h));
     else if (p.tipo === "puxador") ents.push({ t: "poligono", pts: [[H(p) + dx, p.y + dy], [H(p) + p.d + dx, p.y + dy], [H(p) + p.d + dx, p.y + p.h + dy], [H(p) + dx, p.y + p.h + dy]] });
@@ -127,7 +132,7 @@ export type PainelMundo = Painel & { movel?: Movel };
 
 export function paineisMundo(m: Movel, dx = 0, dy = 0, dz = 0): PainelMundo[] {
   return modelo3d(m)
-    .filter((p) => p.tipo !== "dobradica")
+    .filter((p) => p.tipo !== "dobradica" && p.tipo !== "gaveta" && p.tipo !== "corredica")
     .map((p) => ({ ...p, x: p.x + dx, y: p.y + dy, z: p.z + dz, movel: m }));
 }
 

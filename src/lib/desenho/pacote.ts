@@ -5,7 +5,7 @@ import { movelTampo } from "../orcamento";
 import { codigoProduto } from "../orcamento";
 import { furacao } from "./geometria";
 import { dxfPeca } from "./dxf";
-import { pdfConjunto, pdfMovel, pdfPeca, type Contexto } from "./folhas";
+import { pdfConjunto, pdfMovel, pdfPeca, pdfSubconjunto, type Contexto } from "./folhas";
 import { carregarModelos } from "./pdf";
 
 export type OpcoesPacote = { conjunto: boolean; moveis: boolean; pecasPdf: boolean; pecasDxf: boolean };
@@ -32,30 +32,39 @@ export async function gerarPacote(
     const doProduto = moveis.filter((m) => m.divisao_id === d.id);
     if (!doProduto.length) continue;
     const cod = codigoProduto(numero, d) ?? d.designacao;
-    const pasta = raiz.folder(seguro(`${String(d.ordem).padStart(2, "0")}_${cod}`))!;
+    const pasta = raiz; // todos os ficheiros juntos, sem pastas por móvel
     if (op.conjunto) tarefas.push(async () => {
       const nome = `${cod}.pdf`;
       pasta.file(nome, await pdfConjunto(mod, d, doProduto, cod, ctx, tampos[d.id]));
-      lista.push(`${cod}/${nome}`);
+      lista.push(nome);
     });
     const t = tampos[d.id];
     const comTampo = t?.incluir ? [...doProduto, movelTampo(t, d, doProduto, numero)] : doProduto;
     for (const m of comTampo) {
-      const pm = pasta.folder(seguro(m.codigo ?? m.ref))!;
+      const pm = raiz;
       if (op.moveis) tarefas.push(async () => {
         const nome = `${m.codigo ?? m.ref}.pdf`;
         pm.file(seguro(nome), await pdfMovel(mod, m, ctx));
-        lista.push(`${cod}/${m.codigo}/${nome}`);
+        lista.push(`${nome}`);
       });
+      // sub-conjuntos (pré-montagens 13.4 / 33.4)
+      if (op.moveis)
+        for (const sub of [...new Set(m.pecas.map((p) => p.subconjunto).filter(Boolean))]) {
+          tarefas.push(async () => {
+            const cs = m.pecas.find((p) => p.subconjunto === sub)?.codigo_sub ?? `${m.ref}_${sub}`;
+            pm.file(`${seguro(cs)}.pdf`, await pdfSubconjunto(mod, m, sub, ctx));
+            lista.push(`${cs}.pdf`);
+          });
+        }
       for (const p of m.pecas) {
         const base = seguro(p.codigo ?? `${m.ref}_${p.designacao}`);
         if (op.pecasPdf) tarefas.push(async () => {
-          pm.folder("PDF")!.file(`${base}.pdf`, await pdfPeca(mod, m, p, ctx));
-          lista.push(`${cod}/${m.codigo}/PDF/${base}.pdf`);
+          pm.file(`${base}.pdf`, await pdfPeca(mod, m, p, ctx));
+          lista.push(`${base}.pdf`);
         });
         if (op.pecasDxf) tarefas.push(async () => {
-          pm.folder("DXF")!.file(`${base}.dxf`, dxfPeca(p, furacao(p, m)));
-          lista.push(`${cod}/${m.codigo}/DXF/${base}.dxf`);
+          pm.file(`${base}.dxf`, dxfPeca(p, furacao(p, m)));
+          lista.push(`${base}.dxf`);
         });
       }
     }

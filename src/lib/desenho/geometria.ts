@@ -3,7 +3,9 @@
  * As regras de furação seguem a INT.231 (proposta inicial, a validar pela FAMO).
  */
 import type { Movel, Peca } from "../orcamento";
-import { TIPOS_MOVEL } from "../orcamento";
+import { comprimentoCorredica } from "../orcamento";
+import { frentesDoMovel, posicoesDobradica, puxadorDe } from "./modelo3d";
+export { posicoesDobradica };
 
 export type Entidade =
   | { t: "linha"; x1: number; y1: number; x2: number; y2: number; tracejado?: boolean; fina?: boolean }
@@ -69,6 +71,7 @@ export function papel(p: Peca): string {
   if (d.startsWith("lado")) return "lado";
   if (d.includes("divisória")) return "divisoria";
   if (d.startsWith("fundo gaveta")) return "fundo_gaveta";
+  if (d.startsWith("lateral gaveta")) return "lateral_gaveta";
   if (d.startsWith("traseira")) return "traseira_gaveta";
   if (d.startsWith("frente gaveta")) return "frente_gaveta";
   if (d.startsWith("fundo") || d.startsWith("cúpula")) return "horizontal";
@@ -80,18 +83,12 @@ export function papel(p: Peca): string {
   return "outra";
 }
 
-/** Posições das dobradiças ao longo da porta (a 100 mm dos topos). */
-export function posicoesDobradica(altura: number): number[] {
-  const n = altura <= 900 ? 2 : altura <= 1600 ? 3 : 4;
-  if (n === 2) return [100, altura - 100];
-  const passo = (altura - 200) / (n - 1);
-  return Array.from({ length: n }, (_, i) => Math.round(100 + i * passo));
-}
-
 /**
  * Furos na peça. Coordenadas: u ao longo do comprimento (c), v ao longo da largura (l).
  * v = 0 é a aresta da frente nos painéis do corpo.
  */
+const TIPOS_PES = (m: Movel) => (m.tipo === "inferior" || m.tipo === "gaveteiro" || m.tipo === "coluna" || m.tipo === "roupeiro" ? 100 : 0);
+
 export function furacao(p: Peca, m: Movel): Furo[] {
   const f: Furo[] = [];
   const pp = papel(p);
@@ -115,6 +112,16 @@ export function furacao(p: Peca, m: Movel): Furo[] {
         for (const k of [-32, 0, 32]) for (const v of [37, larg - 37 - m.costa_e]) f.push({ u: Math.round(uc + k), v, d: 5, prof: 12, face: "F", desc: "suporte prateleira" });
       }
     }
+    // corrediças das gavetas: Ø5x12 a 37 mm da frente e depois a cada 224 mm (passo 32)
+    if (m.gavetas > 0) {
+      const y0 = TIPOS_PES(m);
+      const Lc = comprimentoCorredica(m.P, m.costa_e);
+      const zs = [37, 37 + 224, ...(Lc >= 450 ? [37 + 448] : [])].filter((z) => z < Lc);
+      for (const fr of frentesDoMovel(m).filter((x) => x.tipo === "gaveta")) {
+        const u = Math.round(fr.y - y0 + 37);
+        for (const v of zs) f.push({ u, v, d: 5, prof: 12, face: "F", desc: "corrediça gaveta" });
+      }
+    }
     // bases das dobradiças (Ø5x12 a 37 e 69 mm da frente)
     if (m.portas > 0 && m.tipo_porta !== "Correr") {
       const lado = p.designacao.toLowerCase().includes("direito") ? "dir" : "esq";
@@ -136,6 +143,21 @@ export function furacao(p: Peca, m: Movel): Furo[] {
   } else if (pp === "porta") {
     // copa da dobradiça Ø35x13 a 22,5 mm da aresta
     for (const u of posicoesDobradica(p.c)) f.push({ u, v: 22.5, d: 35, prof: 13, face: "F", desc: "copa dobradiça" });
+    // puxador (2 furos Ø5 vazados, entre-eixo 128) no lado oposto às dobradiças
+    const fr = frentesDoMovel(m).find((x) => x.tipo === "porta");
+    const px = fr ? puxadorDe(m, { ...fr, dobradicaEsq: true }) : null;
+    if (fr && px) {
+      const uc = px.y + px.h / 2 - fr.y, vc = px.x + px.w / 2 - fr.x;
+      for (const k of [-64, 64]) f.push({ u: Math.round(uc + k), v: Math.round(vc), d: 5, prof: "vazado", face: "F", desc: "puxador" });
+    }
+  } else if (pp === "frente_gaveta") {
+    const fr = frentesDoMovel(m).find((x) => x.tipo === "gaveta");
+    if (fr && puxadorDe(m, fr)) for (const k of [-64, 64]) f.push({ u: Math.round(p.c / 2 + k), v: Math.round(p.l / 2), d: 5, prof: "vazado", face: "F", desc: "puxador" });
+    // fixação à caixa da gaveta (Ø8x12, a 50 mm das extremidades)
+    for (const u of [50, p.c - 50]) f.push({ u, v: Math.round(p.l / 2), d: 8, prof: 12, face: "F", desc: "fixação frente" });
+  } else if (pp === "lateral_gaveta") {
+    // ligação à traseira e à frente
+    for (const v of [p.l * 0.3, p.l * 0.7]) { f.push({ u: 0, v: Math.round(v), d: 8, prof: 23, face: "T", desc: "cavilha 8x35 (topo)" }); f.push({ u: p.c - 8, v: Math.round(v), d: 8, prof: 12, face: "F", desc: "cavilha traseira" }); }
   }
   return f;
 }

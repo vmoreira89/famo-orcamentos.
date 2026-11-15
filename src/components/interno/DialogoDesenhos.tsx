@@ -95,7 +95,7 @@ export default function DialogoDesenhos({
         <p className="text-sm text-slate-600">Que ficheiros pretende? Ficam numa pasta ZIP organizada por produto e móvel, e é guardada uma cópia junto do projecto.</p>
         <div className="space-y-2">
           {caixa("conjunto", "PDF do conjunto", "alçado frontal e perspectiva de cada produto (ex.: cozinha completa)")}
-          {caixa("moveis", "PDF de montagem dos móveis (10…)", "vistas, perspectiva e lista de material")}
+          {caixa("moveis", "PDF de montagem dos móveis (10…) e sub-conjuntos (13.4…)", "vistas, perspectiva, balões e lista de material; gavetas como pré-montagem")}
           {caixa("pecasPdf", "PDF das peças (03.4…)", "geometria cotada, furação, orlas e material")}
           {caixa("pecasDxf", "DXF das peças", "contorno e furações por camada, para SolidWorks/CNC")}
         </div>

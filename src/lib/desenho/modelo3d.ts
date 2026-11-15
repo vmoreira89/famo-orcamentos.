@@ -5,9 +5,17 @@
  */
 import type { Movel } from "../orcamento";
 import { TIPOS_MOVEL } from "../orcamento";
-import { posicoesDobradica } from "./geometria";
+import { comprimentoCorredica } from "../orcamento";
 
-export type TipoPainel = "corpo" | "interior" | "costa" | "frente" | "rodape" | "puxador" | "pe" | "dobradica" | "tampo";
+/** Posições das dobradiças ao longo da porta (a 100 mm dos topos). */
+export function posicoesDobradica(altura: number): number[] {
+  const n = altura <= 900 ? 2 : altura <= 1600 ? 3 : 4;
+  if (n === 2) return [100, altura - 100];
+  const passo = (altura - 200) / (n - 1);
+  return Array.from({ length: n }, (_, i) => Math.round(100 + i * passo));
+}
+
+export type TipoPainel = "corpo" | "interior" | "costa" | "frente" | "rodape" | "puxador" | "pe" | "dobradica" | "tampo" | "gaveta" | "corredica";
 
 export type Painel = {
   nome: string;
@@ -96,6 +104,17 @@ export function modelo3d(m: Movel): Painel[] {
   if (m.tipo === "roupeiro") ps.push({ nome: "Divisória", tipo: "interior", x: L / 2 - E / 2, y: y0 + E, z: 20, w: E, h: A - 2 * E, d: P - 20 - ec, ref: ref("Divisória") });
   // frentes
   const fr = frentesDoMovel(m);
+  // caixas das gavetas (16 mm) e corrediças
+  const Lc = comprimentoCorredica(P, ec);
+  const cx0 = E + 12.5, cw = L - 2 * E - 25;
+  for (const f of fr.filter((x) => x.tipo === "gaveta")) {
+    const yb = f.y + 25, hb = Math.max(80, Math.round(f.h - 50));
+    ps.push({ nome: "Lateral gaveta", tipo: "gaveta", x: cx0, y: yb, z: 2, w: 16, h: hb, d: Lc });
+    ps.push({ nome: "Lateral gaveta", tipo: "gaveta", x: cx0 + cw - 16, y: yb, z: 2, w: 16, h: hb, d: Lc });
+    ps.push({ nome: "Traseira gaveta", tipo: "gaveta", x: cx0 + 16, y: yb + 16, z: 2 + Lc - 16, w: cw - 32, h: hb - 16, d: 16 });
+    ps.push({ nome: "Fundo gaveta", tipo: "gaveta", x: cx0 + 16, y: yb, z: 2, w: cw - 32, h: 16, d: Lc - 16 });
+    for (const xc of [E, cx0 + cw]) ps.push({ nome: "Corrediça", tipo: "corredica", x: xc, y: yb + 6, z: 2, w: 12.5, h: 30, d: Lc });
+  }
   let ig = 0;
   for (const f of fr) {
     const nome = f.tipo === "gaveta" ? `Frente gaveta ${++ig}` : "Porta";

@@ -54,7 +54,13 @@ export type Peca = {
   codigo_sub?: string;
 };
 
-export type LinhaFerragem = { id: string; ref_famo: string | null; descricao: string; qtd: number; preco: number | null; unidade?: string };
+export type LinhaFerragem = { id: string; ref_famo: string | null; descricao: string; qtd: number; preco: number | null; unidade?: string; subconjunto?: string };
+
+/** Comprimento da corrediça: o maior standard que cabe na profundidade útil. */
+export function comprimentoCorredica(P: number, costa: number) {
+  const util = P - costa - 10;
+  return [600, 550, 500, 450, 400, 350, 300, 250].find((c) => c <= util) ?? 250;
+}
 export type LinhaOperacao = { id: string; posto: string; descricao: string; minutos: number; custo_minuto: number | null };
 export type LinhaExtra = { id: string; descricao: string; valor: number | null };
 
@@ -427,11 +433,17 @@ export function decompor(m: Movel, cat: Catalogo): Movel {
   const folga = 3;
   const altGaveta = m.gavetas > 0 ? (m.portas > 0 ? 180 : Math.floor((A - folga * (m.gavetas + 1)) / m.gavetas)) : 0;
   const altPortas = m.portas > 0 ? A - (m.gavetas > 0 ? m.gavetas * (altGaveta + folga) : 0) - folga * 2 : 0;
+  // gavetas: caixa em 16 mm (laterais, traseira, fundo) com folga de 12,5 mm por lado para as corrediças
+  const Lc = comprimentoCorredica(P, m.costa_e);
+  const caixa = interior - 25;
+  const hCaixa = Math.max(80, Math.round(altGaveta - 50));
   for (let g = 1; g <= m.gavetas; g++) {
     const sub = `Gaveta ${g}`;
+    const semExtra = { faces_extra: 0, preco_extra_m2: null };
     pecas.push(peca({ designacao: `Frente gaveta ${g}`, c: L - 2 * folga, l: altGaveta, sup: "frente", subconjunto: sub }));
-    pecas.push(peca({ designacao: `Fundo gaveta ${g}`, c: interior - 30, l: P - 60, e: 16, subconjunto: sub, faces_extra: 0, preco_extra_m2: null }));
-    pecas.push(peca({ designacao: `Traseira gaveta ${g}`, c: interior - 30, l: Math.max(80, altGaveta - 60), e: 16, subconjunto: sub, faces_extra: 0, preco_extra_m2: null }));
+    pecas.push(peca({ designacao: `Lateral gaveta ${g}`, qtd: 2, c: Lc, l: hCaixa, e: 16, subconjunto: sub, ...semExtra }));
+    pecas.push(peca({ designacao: `Traseira gaveta ${g}`, c: caixa - 32, l: hCaixa - 16, e: 16, subconjunto: sub, ...semExtra }));
+    pecas.push(peca({ designacao: `Fundo gaveta ${g}`, c: caixa - 32, l: Lc - 16, e: 16, subconjunto: sub, ...semExtra }));
   }
   if (m.portas > 0 && m.tipo_porta !== "Correr") {
     const larg = m.portas === 1 ? L - 2 * folga : Math.floor((L - folga * (m.portas + 1)) / m.portas);
@@ -452,15 +464,20 @@ export function decompor(m: Movel, cat: Catalogo): Movel {
     fs.push(ferr(cat, "03.2.501.01", m.portas * porPorta));
   }
   if (m.portas > 0 && m.tipo_porta === "Correr") fs.push(ferr(cat, "03.2.342.01", m.portas, "Jogo por porta (correr)"));
-  if (m.gavetas > 0) {
-    fs.push(ferr(cat, "03.7.278.01", m.gavetas)); // par de corrediças
-  }
-  const frentes = m.portas + m.gavetas;
   const pux = (m.puxador || "").toLowerCase();
-  if (frentes > 0) {
-    if (pux.includes("push")) fs.push(ferr(cat, "03.2.519.18", frentes));
-    else if (!pux.includes("gola") && !pux.includes("embutido")) fs.push(ferr(cat, null, frentes, "Puxador (genérico de orçamento)"));
+  const puxador = (qtd: number, sub?: string) => {
+    if (qtd <= 0) return;
+    if (pux.includes("push")) fs.push({ ...ferr(cat, "03.2.519.18", qtd), subconjunto: sub });
+    else if (!pux.includes("gola") && !pux.includes("embutido")) fs.push({ ...ferr(cat, null, qtd, "Puxador (genérico de orçamento)"), subconjunto: sub });
+  };
+  // ferragens de cada gaveta ficam no respectivo sub-conjunto
+  for (let g = 1; g <= m.gavetas; g++) {
+    const sub = `Gaveta ${g}`;
+    fs.push({ ...ferr(cat, "03.7.278.01", 1), subconjunto: sub }); // par de corrediças
+    fs.push({ ...ferr(cat, "03.1.905.01", 12), subconjunto: sub }); // parafusos de fixação
+    puxador(1, sub);
   }
+  puxador(m.portas);
   if (m.prateleiras > 0) fs.push(ferr(cat, "03.2.187.01", m.prateleiras * 4));
   fs.push(ferr(cat, null, 4, "Minifix completo (genérico de orçamento)"));
   fs.push(ferr(cat, "03.1.912.01", 8));
