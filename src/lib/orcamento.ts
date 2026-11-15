@@ -81,6 +81,7 @@ export type Movel = {
   operacoes: LinhaOperacao[];
   extras: LinhaExtra[];
   notas: string;
+  espaco_antes?: number; // mm livres antes deste móvel (janela, electrodoméstico, parede…)
   codigo?: string;
 };
 

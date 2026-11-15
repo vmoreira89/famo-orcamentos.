@@ -283,14 +283,21 @@ export function caixaMovel(m: Movel, x: number, y = 0, z = 0) {
 
 /** Dispõe os móveis de uma divisão: inferiores/colunas no chão, superiores a 1450 mm. */
 export function disposicao(moveis: Movel[]) {
+  // A ordem é a definida no orçamento (posição de cada móvel). Inferiores, gaveteiros e colunas
+  // ficam no chão; superiores a 1450 mm, alinhados pelo início da linha de baixo.
   const baixo = moveis.filter((m) => m.tipo !== "superior");
   const cima = moveis.filter((m) => m.tipo === "superior");
   const out: { m: Movel; x: number; y: number }[] = [];
   let x = 0;
-  for (const m of baixo) for (let i = 0; i < m.qtd; i++) { out.push({ m, x, y: 0 }); x += m.L; }
-  // superiores alinhados à esquerda, por cima dos inferiores (as colunas ficam de fora)
-  x = out.find((o) => o.m.tipo !== "coluna")?.x ?? 0;
-  for (const m of cima) for (let i = 0; i < m.qtd; i++) { out.push({ m, x, y: 1450 }); x += m.L; }
+  for (const m of baixo) {
+    x += m.espaco_antes ?? 0;
+    for (let i = 0; i < m.qtd; i++) { out.push({ m, x, y: 0 }); x += m.L; }
+  }
+  x = 0;
+  for (const m of cima) {
+    x += m.espaco_antes ?? 0;
+    for (let i = 0; i < m.qtd; i++) { out.push({ m, x, y: 1450 }); x += m.L; }
+  }
   return out;
 }
 

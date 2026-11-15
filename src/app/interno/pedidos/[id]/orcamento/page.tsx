@@ -28,6 +28,7 @@ import {
   type TipoMovel,
 } from "@/lib/orcamento";
 import DialogoMotivo from "@/components/DialogoMotivo";
+import { disposicao } from "@/lib/desenho/geometria";
 import DialogoDesenhos from "@/components/interno/DialogoDesenhos";
 import { eOrcamentista, usePerfil } from "@/components/interno/ContextoInterno";
 
@@ -124,6 +125,19 @@ export default function EditorOrcamento() {
     const m = decompor(novoMovel(div, tipo, n), cat!);
     alterar((d) => ({ ...d, moveis: [...d.moveis, m] }));
     setAberto(m.id);
+  }
+  /** Troca o móvel com o anterior/seguinte da mesma divisão. */
+  function mover(mid: string, dir: -1 | 1) {
+    alterar((d) => {
+      const arr = [...d.moveis];
+      const i = arr.findIndex((m) => m.id === mid);
+      const div = arr[i].divisao_id;
+      let j = i + dir;
+      while (j >= 0 && j < arr.length && arr[j].divisao_id !== div) j += dir;
+      if (j < 0 || j >= arr.length) return d;
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+      return { ...d, moveis: arr };
+    });
   }
   function actualizarTudo() {
     alterar((d) => ({ ...d, moveis: d.moveis.map((m) => actualizarPrecos(m, cat!)) }));
@@ -236,6 +250,7 @@ export default function EditorOrcamento() {
               )}
             </div>
             {moveis.length === 0 && <p className="mt-3 text-sm text-slate-400">Ainda sem móveis.</p>}
+            {moveis.length > 0 && <MiniAlcado moveis={moveis} activo={aberto} onEscolher={setAberto} />}
             <div className="mt-3 space-y-3">
               {moveis.map((m) => (
                 <CartaoMovel
@@ -248,6 +263,9 @@ export default function EditorOrcamento() {
                   grupos={grupos}
                   onAlterar={(fn) => alterarMovel(m.id, fn)}
                   onRegenerar={() => alterarMovel(m.id, (x) => decompor(x, cat))}
+                  onMover={(dir) => mover(m.id, dir)}
+                  posicao={moveis.indexOf(m) + 1}
+                  totalPos={moveis.length}
                   onRemover={() => alterar((d) => ({ ...d, moveis: d.moveis.filter((x) => x.id !== m.id) }))}
                   onDuplicar={() => alterar((d) => {
                     const i = d.moveis.findIndex((x) => x.id === m.id);
@@ -327,6 +345,36 @@ export default function EditorOrcamento() {
   );
 }
 
+/** Alçado em miniatura de uma divisão: mostra a posição dos móveis; clicar abre o móvel. */
+function MiniAlcado({ moveis, activo, onEscolher }: { moveis: Movel[]; activo: string | null; onEscolher: (id: string) => void }) {
+  const disp = disposicao(moveis);
+  const pes = (m: Movel) => (TIPOS_MOVEL[m.tipo].pes ? 100 : 0);
+  const W = Math.max(...disp.map((d) => d.x + d.m.L), 1);
+  const H = Math.max(...disp.map((d) => d.y + d.m.A + pes(d.m)), 1);
+  return (
+    <div className="mt-3 rounded-md border border-slate-200 bg-white p-3">
+      <p className="mb-1 text-xs text-slate-500">Posição dos móveis (vista de frente). Use ▲▼ em cada móvel para mudar a ordem; «Espaço antes» deixa um vão (janela, electrodoméstico…).</p>
+      <svg viewBox={`-20 -20 ${W + 40} ${H + 40}`} className="h-40 w-full" role="img" aria-label="Alçado da divisão">
+        <line x1={-20} y1={H} x2={W + 20} y2={H} stroke="#94a3b8" strokeWidth={6} />
+        {disp.map(({ m, x, y }, i) => {
+          const top = H - (y + pes(m) + m.A);
+          const sel = m.id === activo;
+          return (
+            <g key={`${m.id}-${i}`} onClick={() => onEscolher(m.id)} className="cursor-pointer">
+              <rect x={x + 4} y={top} width={m.L - 8} height={m.A} fill={sel ? "#e8eef6" : "#f8fafc"} stroke={sel ? "#1f3a5f" : "#64748b"} strokeWidth={sel ? 12 : 6} />
+              {m.gavetas > 0 && Array.from({ length: m.gavetas - 1 }, (_, g) => (
+                <line key={g} x1={x + 4} x2={x + m.L - 4} y1={top + ((g + 1) * m.A) / m.gavetas} y2={top + ((g + 1) * m.A) / m.gavetas} stroke="#94a3b8" strokeWidth={4} />
+              ))}
+              {m.portas > 1 && <line x1={x + m.L / 2} x2={x + m.L / 2} y1={top} y2={top + m.A} stroke="#94a3b8" strokeWidth={4} />}
+              <text x={x + m.L / 2} y={top + m.A / 2} textAnchor="middle" dominantBaseline="middle" fontSize={Math.min(110, m.L / 4)} fill="#1f3a5f" fontWeight="bold">{m.ref}</text>
+            </g>
+          );
+        })}
+      </svg>
+    </div>
+  );
+}
+
 function Resumo({ titulo, valor, destaque, aviso }: { titulo: string; valor: string; destaque?: boolean; aviso?: boolean }) {
   return (
     <div>
@@ -351,7 +399,13 @@ function CartaoMovel({
   onRegenerar,
   onRemover,
   onDuplicar,
+  onMover,
+  posicao,
+  totalPos,
 }: {
+  onMover: (dir: -1 | 1) => void;
+  posicao: number;
+  totalPos: number;
   m: Movel;
   custo: ReturnType<typeof calcularTotais>["porMovel"][string];
   aberto: boolean;
@@ -368,6 +422,14 @@ function CartaoMovel({
 
   return (
     <div className={`cartao ${custo?.pendentes ? "border-amber-300" : ""}`}>
+      <div className="flex items-stretch">
+      {pode && (
+        <div className="flex flex-col justify-center border-r border-slate-200 px-1">
+          <button className="px-1 text-xs text-slate-500 hover:text-marca disabled:opacity-30" disabled={posicao === 1} onClick={() => onMover(-1)} title="Mover para a esquerda / antes" aria-label="Mover para antes">▲</button>
+          <span className="text-center text-[10px] text-slate-400">{posicao}</span>
+          <button className="px-1 text-xs text-slate-500 hover:text-marca disabled:opacity-30" disabled={posicao === totalPos} onClick={() => onMover(1)} title="Mover para a direita / depois" aria-label="Mover para depois">▼</button>
+        </div>
+      )}
       <button className="flex w-full flex-wrap items-center justify-between gap-2 px-4 py-3 text-left" onClick={onAbrir} aria-expanded={aberto}>
         <span>
           <span className="font-mono text-xs text-slate-500">{m.codigo ?? m.ref}</span>
@@ -380,6 +442,7 @@ function CartaoMovel({
           <span className="text-slate-400">{aberto ? "▲" : "▼"}</span>
         </span>
       </button>
+      </div>
       {aberto && (
         <div className="border-t border-slate-200 p-4">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
@@ -410,6 +473,7 @@ function CartaoMovel({
                 <Num l="Portas" v={m.portas} on={(v) => set("portas", Math.max(0, v))} pode={pode} />
                 <Num l="Gavetas" v={m.gavetas} on={(v) => set("gavetas", Math.max(0, v))} pode={pode} />
                 <Num l="Prateleiras" v={m.prateleiras} on={(v) => set("prateleiras", Math.max(0, v))} pode={pode} />
+                <Num l="Espaço antes (mm)" v={m.espaco_antes ?? 0} on={(v) => set("espaco_antes", Math.max(0, v))} pode={pode} />
                 <Sel l="Tipo de porta" v={m.tipo_porta} op={["Batente", "Correr", "Basculante"]} on={(v) => set("tipo_porta", v)} pode={pode} />
                 <Sel l="Puxador" v={m.puxador} op={["Puxador exterior", "Gola / perfil", "Push-to-open", "Puxador embutido / fresado", "A definir"]} on={(v) => set("puxador", v)} pode={pode} />
               </div>
