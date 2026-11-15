@@ -85,7 +85,9 @@ function TabelaBD({ config, podeEditar }: { config: ConfigTabela; podeEditar: bo
       const sb = supabase();
       const res: Record<string, Record<string, string>> = {};
       for (const c of config.campos.filter((x) => x.tipo === "fk")) {
-        const { data } = await sb.from(c.fk!.tabela).select(`id,${c.fk!.rotulo}`).order(c.fk!.rotulo);
+        let q = sb.from(c.fk!.tabela).select(`id,${c.fk!.rotulo}`).order(c.fk!.rotulo);
+        if (c.fk!.soComValor) q = q.not(c.fk!.soComValor, "is", null);
+        const { data } = await q;
         res[c.k] = Object.fromEntries(((data as unknown as Record<string, string>[]) ?? []).map((r) => [r.id, r[c.fk!.rotulo]]));
       }
       setFks(res);

@@ -6,7 +6,7 @@ export type Campo = {
   tipo: TipoCampo;
   obrigatorio?: boolean;
   opcoes?: { v: string; l: string }[];
-  fk?: { tabela: string; rotulo: string };
+  fk?: { tabela: string; rotulo: string; soComValor?: string };
   lista?: boolean; // mostrar na tabela
   ajuda?: string;
   sufixo?: string;
@@ -89,13 +89,34 @@ export const TABELAS: ConfigTabela[] = [
   {
     id: "precos_grupo_laminado",
     nome: "Preços por grupo",
-    descricao: "Preço por m² de cada grupo de laminado, por espessura.",
-    ordem: [{ col: "grupo_id" }, { col: "espessura_mm" }],
-    pesquisa: ["notas"],
+    descricao: "Preço por m² das placas e por metro linear das orlas, por grupo de laminado. Os preços de um decor específico sobrepõem-se aos do grupo.",
+    ordem: [{ col: "grupo_id" }, { col: "tipo" }, { col: "espessura_mm" }],
+    pesquisa: ["notas", "medida", "tipo"],
     campos: [
       { k: "grupo_id", l: "Grupo", tipo: "fk", fk: { tabela: "grupos_laminado", rotulo: "codigo" }, obrigatorio: true, lista: true },
+      {
+        k: "tipo",
+        l: "Tipo",
+        tipo: "opcoes",
+        obrigatorio: true,
+        lista: true,
+        opcoes: [
+          { v: "placa", l: "Placa (€/m²)" },
+          { v: "orla", l: "Orla (€/ml)" },
+          { v: "orla_laser", l: "Orla laser (€/ml)" },
+        ],
+      },
       { k: "espessura_mm", l: "Espessura", tipo: "numero", sufixo: "mm", obrigatorio: true, lista: true },
-      { k: "preco_m2", l: "Preço", tipo: "numero", sufixo: "€/m²", lista: true },
+      { k: "medida", l: "Medida da orla", tipo: "texto", lista: true, ajuda: "Só para orlas, ex.: 23x2" },
+      {
+        k: "acabamento_id",
+        l: "Decor específico",
+        tipo: "fk",
+        fk: { tabela: "acabamentos", rotulo: "referencia", soComValor: "grupo_id" },
+        lista: true,
+        ajuda: "Vazio = preço do grupo. Preenchido = preço só desse decor (sobrepõe-se ao do grupo).",
+      },
+      { k: "preco_m2", l: "Preço", tipo: "numero", sufixo: "€", lista: true },
       { k: "notas", l: "Notas", tipo: "texto", lista: true },
     ],
   },
