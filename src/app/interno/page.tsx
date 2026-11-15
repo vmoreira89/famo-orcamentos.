@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { ESTADOS, type EstadoPedido, type Membro } from "@/lib/pedido";
+import TabelaFiltravel, { type Coluna } from "@/components/TabelaFiltravel";
 
 type Linha = {
   id: string;
@@ -21,10 +22,10 @@ type Linha = {
 };
 
 export default function ListaOrcamentos() {
+  const router = useRouter();
   const [pedidos, setPedidos] = useState<Linha[]>([]);
   const [equipa, setEquipa] = useState<Record<string, string>>({});
   const [filtro, setFiltro] = useState<EstadoPedido | "todos">("todos");
-  const [pesquisa, setPesquisa] = useState("");
   const [aCarregar, setACarregar] = useState(true);
 
   useEffect(() => {
@@ -45,33 +46,58 @@ export default function ListaOrcamentos() {
     })();
   }, []);
 
-  const visiveis = useMemo(() => {
-    const q = pesquisa.trim().toLowerCase();
-    return pedidos.filter(
-      (p) =>
-        (filtro === "todos" || p.estado === filtro) &&
-        (!q ||
-          [p.referencia, p.numero_projecto, p.nome_projecto, p.contacto_nome, p.contacto_empresa]
-            .filter(Boolean)
-            .some((v) => v!.toLowerCase().includes(q))),
-    );
-  }, [pedidos, filtro, pesquisa]);
+  const linhas = useMemo(() => (filtro === "todos" ? pedidos : pedidos.filter((p) => p.estado === filtro)), [pedidos, filtro]);
+
+  const colunas: Coluna<Linha>[] = [
+    { k: "ref", titulo: "Referência", valor: (p) => p.referencia, render: (p) => <span className="font-mono font-semibold text-marca">{p.referencia}</span> },
+    { k: "num", titulo: "Nº projecto", valor: (p) => p.numero_projecto ?? "", render: (p) => <span className="font-mono">{p.numero_projecto ?? "—"}</span> },
+    {
+      k: "proj",
+      titulo: "Projecto",
+      valor: (p) => p.nome_projecto,
+      render: (p) => {
+        const porVer = p.comentarios.filter((c) => !c.resolvido).length;
+        return (
+          <span className="font-medium">
+            {p.nome_projecto}
+            {porVer > 0 && <span className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-800" title="Comentários por aplicar">💬 {porVer}</span>}
+          </span>
+        );
+      },
+    },
+    { k: "div", titulo: "Divisões", valor: (p) => p.pedido_divisoes.map((d) => `${d.quantidade}× ${d.designacao}`).join(", ") },
+    {
+      k: "cli",
+      titulo: "Cliente",
+      valor: (p) => [p.contacto_nome, p.contacto_empresa].filter(Boolean).join(" · "),
+      render: (p) => (
+        <>
+          {p.contacto_nome}
+          {p.contacto_empresa && <span className="block text-xs text-slate-500">{p.contacto_empresa}</span>}
+        </>
+      ),
+    },
+    { k: "resp", titulo: "Responsável", filtro: "opcoes", valor: (p) => (p.responsavel ? equipa[p.responsavel] ?? "" : "") },
+    { k: "data", titulo: "Data", valor: (p) => p.created_at.slice(0, 10), render: (p) => new Date(p.created_at).toLocaleDateString("pt-PT") },
+    {
+      k: "estado",
+      titulo: "Estado",
+      filtro: "opcoes",
+      valor: (p) => ESTADOS[p.estado].nome,
+      render: (p) => (
+        <>
+          <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${ESTADOS[p.estado].cor}`}>{ESTADOS[p.estado].nome}</span>
+          {p.origem === "interno" && <span className="ml-1 text-xs text-slate-400">interno</span>}
+        </>
+      ),
+    },
+    { k: "origem", titulo: "Origem", filtro: "opcoes", valor: (p) => (p.origem === "interno" ? "Interno" : "Cliente") },
+  ];
 
   return (
-    <div className="mx-auto max-w-6xl px-4 py-8">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <h1 className="text-2xl font-bold">Orçamentos</h1>
-        <input
-          type="search"
-          className="campo max-w-xs"
-          placeholder="Pesquisar referência, nº, projecto, cliente…"
-          aria-label="Pesquisar orçamentos"
-          value={pesquisa}
-          onChange={(e) => setPesquisa(e.target.value)}
-        />
-      </div>
-
-      <div className="mt-6 flex flex-wrap gap-2">
+    <div className="mx-auto max-w-7xl px-4 py-8">
+      <h1 className="text-2xl font-bold">Orçamentos</h1>
+      <div className="mt-4 flex flex-wrap gap-2">
         {(["todos", "novo", "aberto", "pendente", "terminado"] as const).map((e) => {
           const n = e === "todos" ? pedidos.length : pedidos.filter((p) => p.estado === e).length;
           return (
@@ -85,62 +111,15 @@ export default function ListaOrcamentos() {
           );
         })}
       </div>
-
-      <div className="cartao mt-4 overflow-x-auto">
-        <table className="w-full text-left text-sm">
-          <thead className="border-b bg-slate-50 text-xs uppercase text-slate-500">
-            <tr>
-              <th className="px-4 py-3">Referência</th>
-              <th className="px-4 py-3">Nº projecto</th>
-              <th className="px-4 py-3">Projecto</th>
-              <th className="px-4 py-3">Divisões</th>
-              <th className="px-4 py-3">Cliente</th>
-              <th className="px-4 py-3">Responsável</th>
-              <th className="px-4 py-3">Data</th>
-              <th className="px-4 py-3">Estado</th>
-            </tr>
-          </thead>
-          <tbody>
-            {aCarregar && (
-              <tr><td colSpan={8} className="px-4 py-8 text-center text-slate-500">A carregar…</td></tr>
-            )}
-            {!aCarregar && visiveis.length === 0 && (
-              <tr><td colSpan={8} className="px-4 py-8 text-center text-slate-500">Sem pedidos.</td></tr>
-            )}
-            {visiveis.map((p) => {
-              const porVer = p.comentarios.filter((c) => !c.resolvido).length;
-              return (
-                <tr key={p.id} className="border-b last:border-0 hover:bg-slate-50">
-                  <td className="px-4 py-3 font-mono">
-                    <Link href={`/interno/pedidos/${p.id}`} className="font-semibold text-marca hover:underline">
-                      {p.referencia}
-                    </Link>
-                  </td>
-                  <td className="px-4 py-3 font-mono">{p.numero_projecto ?? "—"}</td>
-                  <td className="px-4 py-3 font-medium">
-                    {p.nome_projecto}
-                    {porVer > 0 && (
-                      <span className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-800" title="Comentários por aplicar">
-                        💬 {porVer}
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3">{p.pedido_divisoes.map((d) => `${d.quantidade}× ${d.designacao}`).join(", ")}</td>
-                  <td className="px-4 py-3">
-                    {p.contacto_nome}
-                    {p.contacto_empresa && <span className="block text-xs text-slate-500">{p.contacto_empresa}</span>}
-                  </td>
-                  <td className="px-4 py-3">{p.responsavel ? equipa[p.responsavel] ?? "—" : "—"}</td>
-                  <td className="px-4 py-3">{new Date(p.created_at).toLocaleDateString("pt-PT")}</td>
-                  <td className="px-4 py-3">
-                    <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${ESTADOS[p.estado].cor}`}>{ESTADOS[p.estado].nome}</span>
-                    {p.origem === "interno" && <span className="ml-1 text-xs text-slate-400">interno</span>}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+      <div className="mt-4">
+        <TabelaFiltravel
+          colunas={colunas}
+          linhas={linhas}
+          chave={(p) => p.id}
+          aCarregar={aCarregar}
+          vazio="Sem pedidos."
+          onLinha={(p) => router.push(`/interno/pedidos/${p.id}`)}
+        />
       </div>
     </div>
   );

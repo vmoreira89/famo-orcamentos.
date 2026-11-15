@@ -11,7 +11,8 @@ export default function LayoutInterno({ children }: { children: React.ReactNode 
   const router = useRouter();
   const caminho = usePathname();
   const [perfil, setPerfil] = useState<PerfilAtual | null>(null);
-  const [estado, setEstado] = useState<"a_carregar" | "ok" | "inactivo">("a_carregar");
+  const [estado, setEstado] = useState<"a_carregar" | "ok" | "inactivo" | "recusado">("a_carregar");
+  const [pendentes, setPendentes] = useState(0);
 
   useEffect(() => {
     (async () => {
@@ -23,12 +24,16 @@ export default function LayoutInterno({ children }: { children: React.ReactNode 
       }
       const { data: p } = await sb
         .from("profiles")
-        .select("id,nome,email,nivel,ativo")
+        .select("id,nome,email,nivel,ativo,recusado")
         .eq("id", s.session.user.id)
         .single();
       if (!p?.ativo) {
-        setEstado("inactivo");
+        setEstado(p?.recusado ? "recusado" : "inactivo");
         return;
+      }
+      if (p.nivel === "admin") {
+        const { count } = await sb.from("profiles").select("id", { count: "exact", head: true }).eq("ativo", false).eq("recusado", false);
+        setPendentes(count ?? 0);
       }
       setPerfil(p as PerfilAtual);
       setEstado("ok");
@@ -42,11 +47,15 @@ export default function LayoutInterno({ children }: { children: React.ReactNode 
 
   if (estado === "a_carregar") return <p className="p-10 text-center text-slate-500">A carregar…</p>;
 
-  if (estado === "inactivo" || !perfil)
+  if (estado === "inactivo" || estado === "recusado" || !perfil)
     return (
       <div className="mx-auto max-w-lg px-4 py-16 text-center">
-        <h1 className="text-xl font-bold">Conta a aguardar activação</h1>
-        <p className="mt-2 text-slate-600">A administração tem de activar a sua conta e atribuir-lhe um nível de acesso.</p>
+        <h1 className="text-xl font-bold">{estado === "recusado" ? "Pedido de acesso recusado" : "Conta a aguardar activação"}</h1>
+        <p className="mt-2 text-slate-600">
+          {estado === "recusado"
+            ? "A administração não aprovou o acesso desta conta. Se achar que é um engano, contacte a administração."
+            : "O seu pedido foi recebido. A administração tem de activar a conta e atribuir-lhe um nível de acesso."}
+        </p>
         <button className="btn-secundario mt-6" onClick={sair}>Sair</button>
       </div>
     );
@@ -55,7 +64,7 @@ export default function LayoutInterno({ children }: { children: React.ReactNode 
     { href: "/interno", nome: "Orçamentos", visivel: true },
     { href: "/interno/novo", nome: "Abrir orçamento", visivel: eOrcamentista(perfil.nivel) },
     { href: "/interno/base-dados", nome: "Base de dados", visivel: true },
-    { href: "/interno/utilizadores", nome: "Utilizadores", visivel: perfil.nivel === "admin" },
+    { href: "/interno/utilizadores", nome: pendentes ? `Utilizadores (${pendentes})` : "Utilizadores", visivel: perfil.nivel === "admin" },
   ].filter((s) => s.visivel);
 
   const activo = (href: string) =>

@@ -6,6 +6,7 @@ import { dataHora } from "@/lib/pedido";
 import DialogoMotivo from "@/components/DialogoMotivo";
 import { eGestao, usePerfil } from "@/components/interno/ContextoInterno";
 import { TABELAS, type Campo, type ConfigTabela } from "./config";
+import TabelaFiltravel, { type Coluna } from "@/components/TabelaFiltravel";
 
 type Linha = Record<string, unknown> & { id: string };
 
@@ -133,41 +134,34 @@ function TabelaBD({ config, podeEditar }: { config: ConfigTabela; podeEditar: bo
         </div>
       </div>
 
-      <div className="cartao mt-3 overflow-x-auto">
-        <table className="w-full text-left text-sm">
-          <thead className="border-b bg-slate-50 text-xs uppercase text-slate-500">
-            <tr>
-              {colunas.map((c) => (
-                <th key={c.k} className={`px-3 py-2 ${c.tipo === "numero" ? "text-right" : ""}`}>{c.l}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {aCarregar && linhas.length === 0 && (
-              <tr><td colSpan={colunas.length} className="px-3 py-6 text-center text-slate-500">A carregar…</td></tr>
-            )}
-            {!aCarregar && linhas.length === 0 && (
-              <tr><td colSpan={colunas.length} className="px-3 py-6 text-center text-slate-500">Sem registos.</td></tr>
-            )}
-            {linhas.map((l) => (
-              <tr
-                key={l.id}
-                onClick={() => { setHistorico(null); setEdicao({ ...l }); }}
-                className={`cursor-pointer border-b last:border-0 hover:bg-slate-50 ${l.ativo === false ? "opacity-50" : ""}`}
-              >
-                {colunas.map((c) => (
-                  <td key={c.k} className={`px-3 py-2 ${c.tipo === "numero" ? "text-right tabular-nums" : ""}`}>
-                    {formatar(c, l[c.k], fks)}
-                  </td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <div className="mt-3">
+        <TabelaFiltravel
+          colunas={colunas.map((c): Coluna<Linha> => ({
+            k: c.k,
+            titulo: c.l,
+            direita: c.tipo === "numero",
+            filtro: c.tipo === "opcoes" || c.tipo === "fk" || c.tipo === "bool" ? "opcoes" : "texto",
+            valor: (l) => {
+              const v = l[c.k];
+              if (v === null || v === undefined) return "";
+              if (c.tipo === "numero") return Number(v);
+              if (c.tipo === "bool") return v ? "Sim" : "Não";
+              if (c.tipo === "opcoes") return c.opcoes?.find((o) => o.v === v)?.l ?? String(v);
+              if (c.tipo === "fk") return fks[c.k]?.[String(v)] ?? "";
+              return String(v);
+            },
+            render: (l) => formatar(c, l[c.k], fks),
+          }))}
+          linhas={linhas}
+          chave={(l) => l.id}
+          aCarregar={aCarregar}
+          classeLinha={(l) => (l.ativo === false ? "opacity-50" : "")}
+          onLinha={(l) => { setHistorico(null); setEdicao({ ...l }); }}
+        />
       </div>
-      <p className="mt-2 text-xs text-slate-500">
-        {linhas.length} registo(s){linhas.length >= limite ? ` — a mostrar os primeiros ${limite}; use a pesquisa` : ""}.
-      </p>
+      {linhas.length >= limite && (
+        <p className="mt-2 text-xs text-slate-500">A mostrar os primeiros {limite} registos; use a pesquisa acima para procurar nos restantes.</p>
+      )}
 
       {/* Edição (gestão) ou consulta (restantes) */}
       {podeEditar ? (

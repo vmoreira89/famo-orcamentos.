@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
@@ -27,7 +28,11 @@ export default function Login() {
   return (
     <div className="mx-auto max-w-sm px-4 py-16">
       <form onSubmit={entrar} className="cartao space-y-4 p-6">
-        <h1 className="text-xl font-bold">Área de colaboradores</h1>
+        <div className="flex items-center gap-3">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/logo-famo.png" alt="FAMO" className="h-12 w-12" />
+          <h1 className="text-xl font-bold">Área de colaboradores</h1>
+        </div>
         <div>
           <label className="rotulo" htmlFor="email">Email</label>
           <input id="email" type="email" autoComplete="email" required className="campo" value={email} onChange={(e) => setEmail(e.target.value)} />
@@ -38,7 +43,9 @@ export default function Login() {
         </div>
         {erro && <p role="alert" className="text-sm text-rose-700">{erro}</p>}
         <button className="btn-primario w-full" disabled={aEntrar}>{aEntrar ? "A entrar…" : "Entrar"}</button>
-        <p className="text-xs text-slate-500">As contas são criadas pela administração. Não há registo público.</p>
+        <p className="text-center text-sm">
+          Novo colaborador? <Link href="/registo" className="font-medium text-marca hover:underline">Pedir acesso</Link>
+        </p>
       </form>
     </div>
   );
