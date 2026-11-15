@@ -2,7 +2,7 @@
 
 Plataforma online para pedidos de orçamento (Living), orçamentação e geração de desenhos técnicos (PDF, STEP, DXF).
 
-- **Produção:** https://famo-orcamentacao.vercel.app
+- **Produção:** https://famo-orcamentos.vercel.app
 - **Stack:** Next.js (App Router) · Supabase (Postgres, Auth, Storage) · Resend · Vercel
 
 ## Fases
