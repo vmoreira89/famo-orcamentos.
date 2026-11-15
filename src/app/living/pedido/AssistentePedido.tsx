@@ -10,6 +10,7 @@ import {
   MATERIAIS,
   MDFS,
   letra,
+  nomeFicheiroSeguro,
   precisaMdf,
   type CampoDescritivo,
   type FicheiroCarregado,
@@ -41,7 +42,7 @@ function novaVariante(tipo: TipoDivisao, indice: number): VarianteDivisao {
 
 type Contacto = { nome: string; email: string; telefone: string; empresa: string };
 
-export default function AssistentePedido() {
+export default function AssistentePedido({ interno = false }: { interno?: boolean }) {
   const router = useRouter();
   const sessao = useRef(novaChave());
   const [passo, setPasso] = useState(0);
@@ -94,7 +95,7 @@ export default function AssistentePedido() {
         novosErros.push(`"${f.name}" ultrapassa 50 MB.`);
         continue;
       }
-      const seguro = f.name.normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-zA-Z0-9._-]+/g, "_");
+      const seguro = nomeFicheiroSeguro(f.name);
       const path = `uploads/${sessao.current}/${chave}/${Date.now()}-${seguro}`;
       setUploads((n) => n + 1);
       const { error } = await supabase().storage.from("pedidos").upload(path, f, {
@@ -189,7 +190,7 @@ export default function AssistentePedido() {
       body: JSON.stringify({ id }),
       keepalive: true,
     }).catch(() => {});
-    router.push(`/living/pedido/sucesso?ref=${encodeURIComponent(referencia)}`);
+    router.push(interno ? `/interno/pedidos/${id}` : `/living/pedido/sucesso?ref=${encodeURIComponent(referencia)}`);
   }
 
   return (

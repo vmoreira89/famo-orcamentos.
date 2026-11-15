@@ -96,3 +96,81 @@ export type VarianteDivisao = {
 export function letra(i: number) {
   return String.fromCharCode(65 + (i % 26));
 }
+
+export type Nivel = "admin" | "orcamentista_chefe" | "orcamentista" | "colaborador";
+
+export const NIVEIS: Record<Nivel, string> = {
+  admin: "Administração",
+  orcamentista_chefe: "Orçamentista chefe",
+  orcamentista: "Orçamentista",
+  colaborador: "Colaborador",
+};
+
+export const nomeDivisao = (t: string) => DIVISOES.find((d) => d.id === t)?.nome ?? t;
+export const nomeMaterial = (m: string | null) => MATERIAIS.find((x) => x.id === m)?.nome ?? m ?? "";
+export const nomeMdf = (m: string | null) => MDFS.find((x) => x.id === m)?.nome ?? m ?? "";
+
+export const FORMATO_NUMERO_PROJECTO = /^[0-9]{4,7}\.[0-9]{2}$/;
+
+export type Pedido = {
+  id: string;
+  referencia: string;
+  segmento: string;
+  nome_projecto: string;
+  identificacao_projecto: string | null;
+  contacto_nome: string;
+  contacto_email: string | null;
+  contacto_telefone: string | null;
+  contacto_empresa: string | null;
+  observacoes: string | null;
+  estado: EstadoPedido;
+  numero_projecto: string | null;
+  origem: string;
+  responsavel: string | null;
+  criado_por: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type Divisao = {
+  id: string;
+  pedido_id: string;
+  ordem: number;
+  tipo: TipoDivisao;
+  designacao: string;
+  quantidade: number;
+  material: Material;
+  mdf: Mdf | null;
+  acabamento: string | null;
+  requer_desenho: boolean;
+  descritivo: Record<string, string>;
+};
+
+export type Ficheiro = {
+  id: string;
+  divisao_id: string | null;
+  storage_path: string;
+  nome_original: string;
+  tamanho: number | null;
+  mime: string | null;
+  created_at: string;
+};
+
+export type Comentario = { id: string; autor: string; texto: string; resolvido: boolean; created_at: string };
+
+export type Membro = { id: string; nome: string; email: string; nivel: Nivel; ativo: boolean };
+
+export type Permissoes = {
+  nivel: Nivel | null;
+  pode_editar: boolean;
+  pode_gerir: boolean;
+  pode_comentar: boolean;
+  autorizacao_ate: string | null;
+};
+
+export const dataHora = (s: string) =>
+  new Date(s).toLocaleString("pt-PT", { dateStyle: "short", timeStyle: "short" });
+
+export function nomeFicheiroSeguro(nome: string) {
+  return nome.normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-zA-Z0-9._-]+/g, "_");
+}
