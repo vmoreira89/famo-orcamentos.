@@ -28,7 +28,7 @@ import {
   type TipoMovel,
 } from "@/lib/orcamento";
 import DialogoMotivo from "@/components/DialogoMotivo";
-import { disposicao } from "@/lib/desenho/geometria";
+import { disposicao } from "@/lib/desenho/vistas";
 import DialogoDesenhos from "@/components/interno/DialogoDesenhos";
 import { eOrcamentista, usePerfil } from "@/components/interno/ContextoInterno";
 

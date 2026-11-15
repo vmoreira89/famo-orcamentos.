@@ -20,7 +20,7 @@ const E = 19;
 
 /* ------------------------------------------------------------------ util */
 
-function limites(ents: Entidade[], margem = 0): Vista {
+export function limites(ents: Entidade[], margem = 0): Vista {
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
   const ac = (x: number, y: number) => { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); };
   for (const e of ents) {
@@ -55,7 +55,7 @@ export function juntar(vs: Vista[]): Vista {
   return limites(vs.flatMap((v) => v.ents));
 }
 
-const rect = (x: number, y: number, w: number, h: number, extra: Partial<{ tracejado: boolean; fina: boolean }> = {}): Entidade[] => [
+export const rect = (x: number, y: number, w: number, h: number, extra: Partial<{ tracejado: boolean; fina: boolean }> = {}): Entidade[] => [
   { t: "linha", x1: x, y1: y, x2: x + w, y2: y, ...extra },
   { t: "linha", x1: x + w, y1: y, x2: x + w, y2: y + h, ...extra },
   { t: "linha", x1: x + w, y1: y + h, x2: x, y2: y + h, ...extra },
@@ -194,134 +194,3 @@ export function vistaPeca(p: Peca, furos: Furo[]): Vista {
   return limites(ents);
 }
 
-/* ------------------------------------------------------------------ vistas de um móvel */
-
-function frentes(m: Movel, x0: number, y0: number): Entidade[] {
-  const ents: Entidade[] = [];
-  const f = 3;
-  const altG = m.gavetas > 0 ? (m.portas > 0 ? 180 : (m.A - f * (m.gavetas + 1)) / m.gavetas) : 0;
-  let y = y0 + m.A - f;
-  for (let g = 0; g < m.gavetas; g++) {
-    ents.push(...rect(x0 + f, y - altG, m.L - 2 * f, altG, { fina: true }));
-    ents.push({ t: "linha", x1: x0 + m.L / 2 - 40, y1: y - altG / 2, x2: x0 + m.L / 2 + 40, y2: y - altG / 2 });
-    y -= altG + f;
-  }
-  if (m.portas > 0) {
-    const h = y - (y0 + f);
-    const w = (m.L - f * (m.portas + 1)) / m.portas;
-    for (let i = 0; i < m.portas; i++) {
-      const xi = x0 + f + i * (w + f);
-      ents.push(...rect(xi, y0 + f, w, h, { fina: true }));
-      // indicação de abertura (triângulo tracejado)
-      const esq = m.portas === 1 ? !(m.checklist.abertura ?? "").toLowerCase().includes("esquerda") : i === 0;
-      const xa = esq ? xi : xi + w, xb = esq ? xi + w : xi;
-      ents.push({ t: "linha", x1: xb, y1: y0 + f, x2: xa, y2: y0 + f + h / 2, tracejado: true, fina: true });
-      ents.push({ t: "linha", x1: xa, y1: y0 + f + h / 2, x2: xb, y2: y0 + f + h, tracejado: true, fina: true });
-    }
-  }
-  return ents;
-}
-
-export function vistaFrenteMovel(m: Movel, comCotas = true): Vista {
-  const pes = TIPOS_MOVEL[m.tipo].pes ? 100 : 0;
-  const ents: Entidade[] = [...rect(0, pes, m.L, m.A), ...frentes(m, 0, pes)];
-  if (pes) ents.push(...rect(0, 0, m.L, pes, { fina: true }));
-  if (comCotas) {
-    ents.push({ t: "cota", x1: 0, y1: m.A + pes, x2: m.L, y2: m.A + pes, off: 60 });
-    ents.push({ t: "cota", x1: 0, y1: 0, x2: 0, y2: m.A + pes, off: -90 });
-    if (pes) ents.push({ t: "cota", x1: 0, y1: pes, x2: 0, y2: m.A + pes, off: -45 });
-  }
-  return limites(ents);
-}
-
-export function vistaLadoMovel(m: Movel): Vista {
-  const pes = TIPOS_MOVEL[m.tipo].pes ? 100 : 0;
-  const ents: Entidade[] = [...rect(0, pes, m.P, m.A)];
-  ents.push({ t: "linha", x1: m.P - m.costa_e - 6, y1: pes + E, x2: m.P - m.costa_e - 6, y2: pes + m.A - E, tracejado: true, fina: true });
-  for (let i = 1; i <= m.prateleiras; i++) {
-    const y = pes + E + ((m.A - 2 * E) * i) / (m.prateleiras + 1);
-    ents.push({ t: "linha", x1: 0, y1: y, x2: m.P - m.costa_e - 6, y2: y, tracejado: true, fina: true });
-  }
-  if (pes) ents.push(...rect(30, 0, m.P - 60, pes, { fina: true }));
-  ents.push({ t: "cota", x1: 0, y1: m.A + pes, x2: m.P, y2: m.A + pes, off: 60 });
-  return limites(ents);
-}
-
-export function vistaTopoMovel(m: Movel): Vista {
-  const ents: Entidade[] = [...rect(0, 0, m.L, m.P), ...rect(E, m.costa_e + 6, m.L - 2 * E, m.P - m.costa_e - 6, { tracejado: true, fina: true })];
-  return limites(ents);
-}
-
-/** Perspectiva oblíqua simples (caixas preenchidas a branco, desenhadas de trás para a frente). */
-export function perspectiva(caixas: { x: number; y: number; z: number; L: number; A: number; P: number; m?: Movel }[]): Vista {
-  const k = 0.5, c = Math.cos(Math.PI / 4) * k, s = Math.sin(Math.PI / 4) * k;
-  const pr = (x: number, y: number, z: number): [number, number] => [x + z * c, y + z * s];
-  const ord = [...caixas].sort((a, b) => b.z - a.z || a.y - b.y || a.x - b.x);
-  const ents: Entidade[] = [];
-  for (const b of ord) {
-    const { x, y, z, L, A, P } = b;
-    const frente: [number, number][] = [pr(x, y, z), pr(x + L, y, z), pr(x + L, y + A, z), pr(x, y + A, z)];
-    const topo: [number, number][] = [pr(x, y + A, z), pr(x + L, y + A, z), pr(x + L, y + A, z + P), pr(x, y + A, z + P)];
-    const lado: [number, number][] = [pr(x + L, y, z), pr(x + L, y, z + P), pr(x + L, y + A, z + P), pr(x + L, y + A, z)];
-    ents.push({ t: "poligono", pts: lado, preenchido: true }, { t: "poligono", pts: topo, preenchido: true }, { t: "poligono", pts: frente, preenchido: true });
-    if (b.m) {
-      for (const e of frentes(b.m, x, y)) if (e.t === "linha") {
-        const [a1, a2] = pr(e.x1, e.y1, z), [b1, b2] = pr(e.x2, e.y2, z);
-        ents.push({ ...e, x1: a1, y1: a2, x2: b1, y2: b2 });
-      }
-    }
-  }
-  return limites(ents);
-}
-
-export function caixaMovel(m: Movel, x: number, y = 0, z = 0) {
-  const pes = TIPOS_MOVEL[m.tipo].pes ? 100 : 0;
-  return { x, y: y + pes, z, L: m.L, A: m.A, P: m.P, m };
-}
-
-/* ------------------------------------------------------------------ alçado do conjunto */
-
-/** Dispõe os móveis de uma divisão: inferiores/colunas no chão, superiores a 1450 mm. */
-export function disposicao(moveis: Movel[]) {
-  // A ordem é a definida no orçamento (posição de cada móvel). Inferiores, gaveteiros e colunas
-  // ficam no chão; superiores a 1450 mm, alinhados pelo início da linha de baixo.
-  const baixo = moveis.filter((m) => m.tipo !== "superior");
-  const cima = moveis.filter((m) => m.tipo === "superior");
-  const out: { m: Movel; x: number; y: number }[] = [];
-  let x = 0;
-  for (const m of baixo) {
-    x += m.espaco_antes ?? 0;
-    for (let i = 0; i < m.qtd; i++) { out.push({ m, x, y: 0 }); x += m.L; }
-  }
-  x = 0;
-  for (const m of cima) {
-    x += m.espaco_antes ?? 0;
-    for (let i = 0; i < m.qtd; i++) { out.push({ m, x, y: 1450 }); x += m.L; }
-  }
-  return out;
-}
-
-export function alcadoConjunto(moveis: Movel[]): Vista {
-  const ents: Entidade[] = [];
-  const lista = disposicao(moveis);
-  let maxX = 0, maxY = 0;
-  for (const { m, x, y } of lista) {
-    const v = deslocar(vistaFrenteMovel(m, false), x, y);
-    ents.push(...v.ents);
-    ents.push({ t: "texto", x: x + m.L / 2, y: y + (TIPOS_MOVEL[m.tipo].pes ? 100 : 0) + 25, txt: m.ref, alt: 40, centro: true });
-    maxX = Math.max(maxX, x + m.L);
-    maxY = Math.max(maxY, y + m.A + (TIPOS_MOVEL[m.tipo].pes ? 100 : 0));
-  }
-  ents.push({ t: "linha", x1: -100, y1: 0, x2: maxX + 100, y2: 0, fina: true }); // chão
-  ents.push({ t: "cota", x1: 0, y1: maxY, x2: maxX, y2: maxY, off: 150 });
-  ents.push({ t: "cota", x1: 0, y1: 0, x2: 0, y2: maxY, off: -200 });
-  // cadeia de larguras dos móveis de baixo
-  for (const { m, x, y } of lista.filter((a) => a.y === 0)) ents.push({ t: "cota", x1: x, y1: 0, x2: x + m.L, y2: 0, off: -120 });
-  return limites(ents);
-}
-
-export function perspectivaConjunto(moveis: Movel[]): Vista {
-  const disp = disposicao(moveis);
-  const fundo = Math.max(...disp.map((d) => d.m.P)); // todos encostados à parede
-  return perspectiva(disp.map(({ m, x, y }) => caixaMovel(m, x, y, fundo - m.P)));
-}

@@ -2,20 +2,19 @@ import type { PDFDocument } from "pdf-lib";
 import type { Divisao } from "../pedido";
 import { nomeDivisao, nomeMaterial, nomeMdf } from "../pedido";
 import { arestasOrla, type EspecMaterial, type Movel, type Peca } from "../orcamento";
+import { deslocar, furacao, juntar, legendaFuros, vistaPeca } from "./geometria";
 import {
   alcadoConjunto,
-  deslocar,
-  furacao,
-  juntar,
-  legendaFuros,
-  perspectiva,
+  alvosIso,
+  baloes,
+  ladoConjunto,
+  paineisMundo,
   perspectivaConjunto,
-  caixaMovel,
   vistaFrenteMovel,
+  vistaIso,
   vistaLadoMovel,
-  vistaPeca,
   vistaTopoMovel,
-} from "./geometria";
+} from "./vistas";
 import {
   A3,
   ZONA,
@@ -123,9 +122,12 @@ export async function pdfMovel(mod: Modelos, m: Movel, ctx: Contexto) {
     linhas.push({ qtd: String(f.qtd), designacao: f.descricao, codigo: f.ref_famo ?? "", material: "", ref: String(ref++), peso: "" });
   }
   const topoLista = listaMaterial(pg, r, linhas);
-  // perspectiva por cima da lista
+  // perspectiva com balões (nº de referência da lista)
+  const numeros: Record<string, string> = {};
+  linhas.forEach((l) => { if (l.codigo && !numeros[l.codigo]) numeros[l.codigo] = l.ref; });
+  const pm = paineisMundo(m);
   const livre = ZONA.YT - 45 - topoLista;
-  if (livre > 110) desenharVista(pg, r, perspectiva([caixaMovel(m, 0)]), { x: ZONA.XR + 20, y: topoLista + 10, w: ZONA.X1 - ZONA.XR - 40, h: livre - 15 });
+  if (livre > 110) desenharVista(pg, r, baloes(vistaIso(pm), alvosIso(pm, numeros)), { x: ZONA.XR + 10, y: topoLista + 8, w: ZONA.X1 - ZONA.XR - 20, h: livre - 10 });
   caixasProcesso(pg, r, ZONA.X1 - 160, ZONA.YT - 30, ["10"]);
   const pesoTotal = m.pecas.reduce((a, p) => a + pesoPeca(p), 0);
   legenda(pg, r, {
@@ -161,7 +163,10 @@ export async function pdfConjunto(mod: Modelos, d: Divisao, moveis: Movel[], cod
   }));
   const topoLista = listaMaterial(pg, r, linhas, ZONA.YT - 200);
   const alc = alcadoConjunto(moveis);
-  const s = desenharVista(pg, r, alc, { x: ZONA.X0 + 15, y: ZONA.YB + 20, w: ZONA.XR - ZONA.X0 - 30, h: ZONA.YT - ZONA.YB - 40 });
+  const lado = ladoConjunto(moveis);
+  const gap = 600;
+  const vistaEsq = lado ? juntar([alc, deslocar(lado, alc.x1 + gap - lado.x0, 0)]) : alc;
+  const s = desenharVista(pg, r, vistaEsq, { x: ZONA.X0 + 15, y: ZONA.YB + 20, w: ZONA.XR - ZONA.X0 - 30, h: ZONA.YT - ZONA.YB - 40 });
   const livre = ZONA.YT - 20 - topoLista;
   if (livre > 100) desenharVista(pg, r, perspectivaConjunto(moveis), { x: ZONA.XR + 15, y: topoLista + 10, w: ZONA.X1 - ZONA.XR - 30, h: livre - 15 });
   legenda(pg, r, {
