@@ -47,6 +47,7 @@ import CampoNumero from "@/components/CampoNumero";
 import { disposicao, paineisTampo } from "@/lib/desenho/vistas";
 import DialogoDesenhos from "@/components/interno/DialogoDesenhos";
 import DialogoLeitura from "@/components/interno/DialogoLeitura";
+import SeletorDecor, { type Decor } from "@/components/interno/SeletorDecor";
 import type { PropostaMovel } from "@/lib/leitura";
 import { eOrcamentista, usePerfil } from "@/components/interno/ContextoInterno";
 
@@ -791,24 +792,6 @@ function CartaoMovel({
         </div>
       )}
     </div>
-  );
-}
-
-type Decor = { referencia: string; descricao: string; grupo: string };
-
-/** Lista fixa das referências de laminado (no Living trabalha-se por referência do fornecedor, sem grupos). */
-function SeletorDecor({ decors, valor, pode, onChange }: { decors: Decor[]; valor: string; pode: boolean; onChange: (ref: string) => void }) {
-  const foraDaLista = valor && !decors.some((d) => d.referencia === valor);
-  return (
-    <select className="campo" disabled={!pode} value={valor} onChange={(e) => onChange(e.target.value)}>
-      <option value="">—</option>
-      {foraDaLista && <option value={valor}>{valor} (fora da lista)</option>}
-      {decors.map((d) => (
-        <option key={d.referencia} value={d.referencia}>
-          {d.referencia}{d.descricao && d.descricao !== d.referencia ? ` · ${d.descricao}` : ""}
-        </option>
-      ))}
-    </select>
   );
 }
 
