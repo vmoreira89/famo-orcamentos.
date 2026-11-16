@@ -2,7 +2,10 @@
  * Folhas A3 no formato FAMO (IMP M 028/029): geometria à esquerda,
  * tabela/pormenores à direita e legenda no canto inferior direito.
  */
-import { PDFDocument, PDFFont, PDFImage, PDFPage, StandardFonts, degrees, rgb } from "pdf-lib";
+import {
+  PDFDocument, PDFFont, PDFImage, PDFPage, StandardFonts, degrees, rgb, type RGB,
+  pushGraphicsState, popGraphicsState, concatTransformationMatrix, drawObject, moveTo, lineTo, closePath, clip, endPath,
+} from "pdf-lib";
 import type { Entidade, Vista } from "./geometria";
 
 export const A3 = { w: 1191, h: 842 };
@@ -11,7 +14,58 @@ const X0 = 58.6, X1 = 1161.3, YB = 24.3, YT = 816.3, XR = 648, YTB = 220, YPOR =
 const PRETO = rgb(0, 0, 0);
 const ESCALAS = [1, 2, 2.5, 5, 10, 15, 20, 25, 30, 40, 50, 75, 100, 150, 200];
 
-export type Recursos = { doc: PDFDocument; f: PDFFont; fb: PDFFont; pormenores: PDFImage; tolerancias: PDFImage; logo: PDFImage };
+export type Recursos = { doc: PDFDocument; f: PDFFont; fb: PDFFont; pormenores: PDFImage; tolerancias: PDFImage; logo: PDFImage; texturas?: Record<string, Textura> };
+
+/** Amostra de um acabamento: imagem (JPEG/PNG em data URL) e/ou cor #RRGGBB. Chave: referência sem espaços, em maiúsculas. */
+export type Amostra = { referencia: string; descricao?: string; img?: string | null; cor?: string | null };
+type Textura = { img?: PDFImage; cor?: RGB; ref: string; descricao: string };
+export const chaveDecor = (s: string) => (s ?? "").replace(/\s+/g, "").toUpperCase();
+/** Tamanho real (mm) representado por uma amostra ao pintar a perspectiva. */
+const LADO_AMOSTRA_MM = 400;
+
+function hexRgb(h: string): RGB {
+  const n = parseInt(h.slice(1), 16);
+  return rgb(((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255);
+}
+function bytesDataUrl(u: string): Uint8Array {
+  const b64 = u.slice(u.indexOf(",") + 1);
+  if (typeof atob === "function") return Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+  return new Uint8Array(Buffer.from(b64, "base64"));
+}
+
+/** Embute no PDF as amostras dos acabamentos usados (só as que aparecem em `refs`). */
+export async function embutirAmostras(r: Recursos, amostras: Record<string, Amostra> | undefined, refs: string[]) {
+  r.texturas = {};
+  if (!amostras) return;
+  for (const ref of new Set(refs.filter(Boolean).map(chaveDecor))) {
+    const a = amostras[ref];
+    if (!a) continue;
+    let img: PDFImage | undefined;
+    try {
+      if (a.img?.startsWith("data:image/jpeg") || a.img?.startsWith("data:image/jpg")) img = await r.doc.embedJpg(bytesDataUrl(a.img));
+      else if (a.img?.startsWith("data:image/png")) img = await r.doc.embedPng(bytesDataUrl(a.img));
+    } catch { img = undefined; }
+    if (img || a.cor) r.texturas[ref] = { img, cor: a.cor ? hexRgb(a.cor) : undefined, ref: a.referencia, descricao: a.descricao ?? "" };
+  }
+}
+
+/** Quadro «Acabamentos» com a amostra, a referência e a descrição de cada acabamento usado. */
+export function quadroAcabamentos(pg: PDFPage, r: Recursos, x: number, y: number, larg: number): number {
+  const ts = Object.values(r.texturas ?? {});
+  if (!ts.length) return 0;
+  const lado = 18, passo = 150, porLinha = Math.max(1, Math.floor(larg / passo));
+  const linhas = Math.ceil(ts.length / porLinha);
+  texto(pg, r.fb, "ACABAMENTOS", x, y + linhas * (lado + 6) + 2, 7);
+  ts.forEach((t, i) => {
+    const cx = x + (i % porLinha) * passo, cy = y + (linhas - 1 - Math.floor(i / porLinha)) * (lado + 6);
+    if (t.img) pg.drawImage(t.img, { x: cx, y: cy, width: lado, height: lado });
+    else pg.drawRectangle({ x: cx, y: cy, width: lado, height: lado, color: t.cor });
+    caixa(pg, cx, cy, lado, lado, 0.4);
+    texto(pg, r.fb, t.ref, cx + lado + 4, cy + 10, 6.5);
+    texto(pg, r.f, t.descricao, cx + lado + 4, cy + 2.5, ajustar(r.f, t.descricao, 5.5, passo - lado - 10));
+  });
+  return linhas * (lado + 6) + 12;
+}
 
 export type InfoFolha = {
   codigo: string;
@@ -78,6 +132,31 @@ function ajustar(f: PDFFont, t: string, tamMax: number, largura: number) {
 
 /* ------------------------------------------------------------------ vista à escala */
 
+/**
+ * Pinta uma imagem em mosaico num paralelogramo (face de um painel na perspectiva):
+ * pts[0] é o canto de origem, pts[1] e pts[3] os cantos ao longo das duas arestas.
+ * Cada ladrilho representa LADO_AMOSTRA_MM; o mosaico é recortado pela face.
+ */
+function pintarTextura(pg: PDFPage, img: PDFImage, pts: [number, number][], X: (x: number) => number, Y: (y: number) => number, k: number) {
+  const P = pts.map(([x, y]) => [X(x), Y(y)] as [number, number]);
+  const ux = P[1][0] - P[0][0], uy = P[1][1] - P[0][1], vx = P[3][0] - P[0][0], vy = P[3][1] - P[0][1];
+  // comprimentos reais (mm) das duas arestas: a projecção isométrica encurta ~0,816 (√(2/3))
+  const lu = Math.hypot(ux, uy) / k / 0.8165, lv = Math.hypot(vx, vy) / k / 0.8165;
+  if (lu < 1 || lv < 1) return;
+  const nu = Math.max(1, Math.ceil(lu / LADO_AMOSTRA_MM)), nv = Math.max(1, Math.ceil(lv / LADO_AMOSTRA_MM));
+  if (nu * nv > 400) return; // faces enormes: fica só a cor
+  const su = LADO_AMOSTRA_MM / lu, sv = LADO_AMOSTRA_MM / lv; // fracção da aresta ocupada por um ladrilho
+  const nome = pg.node.newXObject("Image", img.ref);
+  const ops = [pushGraphicsState(), moveTo(P[0][0], P[0][1]), lineTo(P[1][0], P[1][1]), lineTo(P[2][0], P[2][1]), lineTo(P[3][0], P[3][1]), closePath(), clip(), endPath()];
+  for (let i = 0; i < nu; i++)
+    for (let j = 0; j < nv; j++) {
+      const ox = P[0][0] + ux * su * i + vx * sv * j, oy = P[0][1] + uy * su * i + vy * sv * j;
+      ops.push(pushGraphicsState(), concatTransformationMatrix(ux * su, uy * su, vx * sv, vy * sv, ox, oy), drawObject(nome), popGraphicsState());
+    }
+  ops.push(popGraphicsState());
+  pg.pushOperators(...ops);
+}
+
 export function escalaPara(v: Vista, w: number, h: number): number {
   const lw = v.x1 - v.x0, lh = v.y1 - v.y0;
   for (const s of ESCALAS) if ((lw * MM) / s <= w && (lh * MM) / s <= h) return s;
@@ -111,7 +190,15 @@ function desenharEntidade(pg: PDFPage, r: Recursos, e: Entidade, X: (x: number) 
     }
     case "poligono": {
       const d = e.pts.map(([x, y], i) => `${i ? "L" : "M"}${X(x).toFixed(2)} ${(-Y(y)).toFixed(2)}`).join(" ") + " Z";
-      pg.drawSvgPath(d, { x: 0, y: 0, color: e.preenchido ? rgb(1, 1, 1) : PRETO, borderColor: PRETO, borderWidth: 0.6 });
+      const tx = e.preenchido && e.textura ? r.texturas?.[chaveDecor(e.textura)] : undefined;
+      if (!tx) {
+        pg.drawSvgPath(d, { x: 0, y: 0, color: e.preenchido ? rgb(1, 1, 1) : PRETO, borderColor: PRETO, borderWidth: 0.6 });
+        break;
+      }
+      // face pintada com a cor da amostra e, havendo imagem, com a textura em mosaico à escala real
+      pg.drawSvgPath(d, { x: 0, y: 0, color: tx.cor ?? rgb(1, 1, 1) });
+      if (tx.img && e.pts.length === 4) pintarTextura(pg, tx.img, e.pts, X, Y, k);
+      pg.drawSvgPath(d, { x: 0, y: 0, borderColor: PRETO, borderWidth: 0.6 });
       break;
     }
     case "texto":

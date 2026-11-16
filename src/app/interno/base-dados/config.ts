@@ -1,4 +1,4 @@
-export type TipoCampo = "texto" | "textarea" | "numero" | "bool" | "opcoes" | "fk";
+export type TipoCampo = "texto" | "textarea" | "numero" | "bool" | "opcoes" | "fk" | "imagem" | "cor";
 
 export type Campo = {
   k: string;
@@ -136,6 +136,8 @@ export const TABELAS: ConfigTabela[] = [
       { k: "tipo", l: "Tipo", tipo: "texto", lista: true },
       { k: "categoria", l: "Categoria", tipo: "texto" },
       { k: "grupo_id", l: "Grupo de laminado", tipo: "fk", fk: { tabela: "grupos_laminado", rotulo: "codigo" }, lista: true },
+      { k: "amostra", l: "Amostra", tipo: "imagem", lista: true, ajuda: "Imagem do decor (é reduzida para 256 px). Usada no orçamento e para pintar as perspectivas dos desenhos." },
+      { k: "cor", l: "Cor aproximada", tipo: "cor", lista: true, ajuda: "Usada nos desenhos quando não há amostra (ex.: lacados)." },
       { k: "observacoes", l: "Observações", tipo: "textarea" },
       ativo,
     ],

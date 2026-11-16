@@ -93,7 +93,7 @@ export default function EditorOrcamento() {
       sb.from("orcamentos").select("versao,dados,parametros,margem_pct").eq("pedido_id", id).maybeSingle(),
       sb.rpc("minhas_permissoes", { p_id: id }),
       carregarCatalogo(),
-      sb.from("acabamentos").select("referencia,descricao,grupo_id").or("tipo.ilike.lam%,tipo.ilike.termolam%,grupo_id.not.is.null").eq("ativo", true).order("referencia").limit(3000),
+      sb.from("acabamentos").select("referencia,descricao,grupo_id,amostra,cor").or("tipo.ilike.lam%,tipo.ilike.termolam%,grupo_id.not.is.null").eq("ativo", true).order("referencia").limit(3000),
       sb.from("grupos_laminado").select("id,codigo"),
       sb.from("pedido_ficheiros").select("divisao_id").eq("pedido_id", id),
       sb.from("orcamento_rascunhos").select("versao_base,dados,parametros,margem_pct,updated_at").eq("pedido_id", id).maybeSingle(),
@@ -113,9 +113,9 @@ export default function EditorOrcamento() {
     setCat(c);
     const vistos = new Set<string>();
     setDecors(
-      ((ac.data as { referencia: string; descricao: string; grupo_id: string | null }[]) ?? [])
+      ((ac.data as { referencia: string; descricao: string; grupo_id: string | null; amostra: string | null; cor: string | null }[]) ?? [])
         .filter((x) => x.referencia && !vistos.has(x.referencia) && vistos.add(x.referencia))
-        .map((x) => ({ referencia: x.referencia, descricao: x.descricao, grupo: x.grupo_id ? codGrupo[x.grupo_id] ?? "" : "" })),
+        .map((x) => ({ referencia: x.referencia, descricao: x.descricao, grupo: x.grupo_id ? codGrupo[x.grupo_id] ?? "" : "", amostra: x.amostra, cor: x.cor })),
     );
     const orc = o.data as LinhaOrc | null;
     if (orc) {

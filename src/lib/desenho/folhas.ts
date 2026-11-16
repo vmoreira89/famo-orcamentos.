@@ -21,6 +21,9 @@ import {
 import {
   A3,
   ZONA,
+  embutirAmostras,
+  quadroAcabamentos,
+  type Amostra,
   ZONA_GEOMETRIA,
   cabecalhoGeometria,
   caixasProcesso,
@@ -35,7 +38,14 @@ import {
   type Modelos,
 } from "./pdf";
 
-export type Contexto = { numero: string; data: string; desenhou: string; processo: string };
+export type Contexto = { numero: string; data: string; desenhou: string; processo: string; amostras?: Record<string, Amostra> };
+
+/** Referências de acabamento visíveis num móvel (corpo, frentes, faces e portas com acabamento próprio). */
+export function decoresMovel(m: Movel): string[] {
+  const out = [m.corpo.acabamento, m.frente.acabamento, m.frente.dentro?.acabamento ?? ""];
+  for (const e of Object.values(m.portas_acab ?? {})) out.push(e.acabamento, e.dentro?.acabamento ?? "");
+  return out.filter(Boolean);
+}
 
 const DENSIDADE = 700; // kg/m³ (aproximação para placas)
 const pesoPeca = (p: Peca) => (p.qtd * p.c * p.l * p.e * 1e-9 * DENSIDADE);
@@ -98,6 +108,7 @@ export async function pdfPeca(mod: Modelos, m: Movel, p: Peca, ctx: Contexto) {
 
 export async function pdfMovel(mod: Modelos, m: Movel, ctx: Contexto) {
   const r = await criarRecursos(mod);
+  await embutirAmostras(r, ctx.amostras, decoresMovel(m));
   const pg = r.doc.addPage([A3.w, A3.h]);
   moldura(pg);
   const gap = Math.max(250, m.L * 0.25);
@@ -128,10 +139,11 @@ export async function pdfMovel(mod: Modelos, m: Movel, ctx: Contexto) {
   const numeros: Record<string, string> = { ...refSub };
   linhas.forEach((l) => { if (l.codigo && !numeros[l.codigo]) numeros[l.codigo] = l.ref; });
   const pm = paineisMundo(m);
-  const livre = ZONA.YT - 45 - topoLista;
+  const qa = quadroAcabamentos(pg, r, ZONA.XR + 10, topoLista + 8, ZONA.X1 - ZONA.XR - 20);
+  const livre = ZONA.YT - 45 - topoLista - qa;
   // um balão por nº (as peças de um sub-conjunto partilham o nº do sub-conjunto)
   const alvos = alvosIso(pm, numeros).filter((a, i, arr) => arr.findIndex((b) => b.n === a.n) === i);
-  if (livre > 110) desenharVista(pg, r, baloes(vistaIso(pm), alvos), { x: ZONA.XR + 10, y: topoLista + 8, w: ZONA.X1 - ZONA.XR - 20, h: livre - 10 });
+  if (livre > 110) desenharVista(pg, r, baloes(vistaIso(pm), alvos), { x: ZONA.XR + 10, y: topoLista + 8 + qa, w: ZONA.X1 - ZONA.XR - 20, h: livre - 10 });
   caixasProcesso(pg, r, ZONA.X1 - 160, ZONA.YT - 30, ["10"]);
   const pesoTotal = m.pecas.reduce((a, p) => a + pesoPeca(p), 0);
   legenda(pg, r, {
@@ -154,6 +166,7 @@ export async function pdfMovel(mod: Modelos, m: Movel, ctx: Contexto) {
 
 export async function pdfConjunto(mod: Modelos, d: Divisao, moveis: Movel[], codigoProduto: string, ctx: Contexto, tampo?: Tampo | null) {
   const r = await criarRecursos(mod);
+  await embutirAmostras(r, ctx.amostras, [...moveis.flatMap(decoresMovel), tampo?.incluir ? tampo.acabamento : ""]);
   const pg = r.doc.addPage([A3.w, A3.h]);
   moldura(pg);
   const linhas = moveis.map((m, i) => ({
@@ -186,9 +199,10 @@ export async function pdfConjunto(mod: Modelos, d: Divisao, moveis: Movel[], cod
   const gap = 600;
   const vistaEsq = lado ? juntar([alc, deslocar(lado, alc.x1 + gap - lado.x0, 0)]) : alc;
   const s = desenharVista(pg, r, vistaEsq, { x: ZONA.X0 + 15, y: ZONA.YB + 20, w: ZONA.XR - ZONA.X0 - 30, h: ZONA.YT - ZONA.YB - 40 });
-  const livre = ZONA.YT - 20 - topoLista;
+  const qa = quadroAcabamentos(pg, r, ZONA.XR + 10, topoLista + 8, ZONA.X1 - ZONA.XR - 20);
+  const livre = ZONA.YT - 20 - topoLista - qa;
   const numeros = Object.fromEntries(linhas.map((l) => [l._movel, l.ref]));
-  if (livre > 100) desenharVista(pg, r, baloes(perspectivaConjunto(moveis, tampo), alvosConjunto(moveis, tampo, numeros)), { x: ZONA.XR + 10, y: topoLista + 8, w: ZONA.X1 - ZONA.XR - 20, h: livre - 10 });
+  if (livre > 100) desenharVista(pg, r, baloes(perspectivaConjunto(moveis, tampo), alvosConjunto(moveis, tampo, numeros)), { x: ZONA.XR + 10, y: topoLista + 8 + qa, w: ZONA.X1 - ZONA.XR - 20, h: livre - 10 });
   legenda(pg, r, {
     codigo: codigoProduto,
     designacao: `${d.designacao} - ${nomeDivisao(d.tipo)}`.toUpperCase(),
@@ -246,6 +260,7 @@ export async function pdfSubconjunto(mod: Modelos, m: Movel, sub: string, ctx: C
   const pecas = m.pecas.filter((p) => p.subconjunto === sub);
   const ferragens = m.ferragens.filter((f) => f.subconjunto === sub);
   const r = await criarRecursos(mod);
+  await embutirAmostras(r, ctx.amostras, decoresMovel(m));
   const pg = r.doc.addPage([A3.w, A3.h]);
   moldura(pg);
   const W = Math.max(...ps.map((p) => p.x + p.w)), H = Math.max(...ps.map((p) => p.y + p.h)), D = Math.max(...ps.map((p) => p.z + p.d));
@@ -297,8 +312,9 @@ export async function pdfSubconjunto(mod: Modelos, m: Movel, sub: string, ctx: C
     const [x, y] = p.tipo === "frente" ? iso(p.x + p.w / 2, p.y + p.h * 0.7, p.z) : corpo && p.w < p.h ? iso(p.x + p.w, p.y + p.h * 0.6, p.z + p.d * 0.3) : iso(p.x + p.w / 2, p.y + p.h, p.z + p.d / 2);
     alvos.push({ n, x, y });
   }
-  const livre = ZONA.YT - 45 - topoLista;
-  if (livre > 110) desenharVista(pg, r, baloes(vistaIso(pm), alvos), { x: ZONA.XR + 10, y: topoLista + 8, w: ZONA.X1 - ZONA.XR - 20, h: livre - 10 });
+  const qa = quadroAcabamentos(pg, r, ZONA.XR + 10, topoLista + 8, ZONA.X1 - ZONA.XR - 20);
+  const livre = ZONA.YT - 45 - topoLista - qa;
+  if (livre > 110) desenharVista(pg, r, baloes(vistaIso(pm), alvos), { x: ZONA.XR + 10, y: topoLista + 8 + qa, w: ZONA.X1 - ZONA.XR - 20, h: livre - 10 });
   caixasProcesso(pg, r, ZONA.X1 - 160, ZONA.YT - 30, ["13"]);
   const codigo = pecas.find((p) => p.codigo_sub)?.codigo_sub ?? `${sub} ${m.ref}`;
   legenda(pg, r, {

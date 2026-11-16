@@ -47,6 +47,8 @@ function formatar(c: Campo, v: unknown, fks: Record<string, Record<string, strin
   if (c.tipo === "bool") return v ? "Sim" : <span className="text-slate-400">Não</span>;
   if (c.tipo === "opcoes") return c.opcoes?.find((o) => o.v === v)?.l ?? String(v);
   if (c.tipo === "fk") return fks[c.k]?.[String(v)] ?? "—";
+  if (c.tipo === "imagem") return <img src={String(v)} alt="" className="h-8 w-8 rounded border border-slate-300 object-cover" />;
+  if (c.tipo === "cor") return <span className="inline-flex items-center gap-1.5"><span className="inline-block h-4 w-4 rounded border border-slate-300" style={{ backgroundColor: String(v) }} />{String(v)}</span>;
   if (c.tipo === "numero") {
     const n = Number(v);
     const txt = n.toLocaleString("pt-PT", { maximumFractionDigits: 4 });
@@ -131,6 +133,7 @@ function TabelaBD({ config, podeEditar }: { config: ConfigTabela; podeEditar: bo
             value={pesquisa}
             onChange={(e) => setPesquisa(e.target.value)}
           />
+          {podeEditar && config.id === "acabamentos" && <ImportarAmostras onFeito={carregar} />}
           {podeEditar && <button className="btn-primario whitespace-nowrap" onClick={novo}>+ Novo</button>}
         </div>
       </div>
@@ -141,12 +144,13 @@ function TabelaBD({ config, podeEditar }: { config: ConfigTabela; podeEditar: bo
             k: c.k,
             titulo: c.l,
             direita: c.tipo === "numero",
-            filtro: c.tipo === "opcoes" || c.tipo === "fk" || c.tipo === "bool" ? "opcoes" : "texto",
+            filtro: c.tipo === "opcoes" || c.tipo === "fk" || c.tipo === "bool" || c.tipo === "imagem" ? "opcoes" : "texto",
             valor: (l) => {
               const v = l[c.k];
               if (v === null || v === undefined) return "";
               if (c.tipo === "numero") return Number(v);
               if (c.tipo === "bool") return v ? "Sim" : "Não";
+              if (c.tipo === "imagem") return v ? "Com amostra" : "";
               if (c.tipo === "opcoes") return c.opcoes?.find((o) => o.v === v)?.l ?? String(v);
               if (c.tipo === "fk") return fks[c.k]?.[String(v)] ?? "";
               return String(v);
@@ -266,6 +270,14 @@ function Formulario({
                 <option value="">—</option>
                 {Object.entries(fks[c.k] ?? {}).map(([fid, r]) => <option key={fid} value={fid}>{r}</option>)}
               </select>
+            ) : c.tipo === "imagem" ? (
+              <CampoImagem id={id} valor={(v as string) ?? null} onChange={(u) => set(c.k, u)} />
+            ) : c.tipo === "cor" ? (
+              <div className="flex items-center gap-2">
+                <input type="color" aria-label={c.l} className="h-9 w-12 cursor-pointer rounded border border-slate-300" value={(v as string) || "#ffffff"} onChange={(e) => set(c.k, e.target.value.toUpperCase())} />
+                <input id={id} className="campo w-32" placeholder="#RRGGBB" value={(v as string) ?? ""} onChange={(e) => set(c.k, e.target.value.trim() || null)} />
+                {v ? <button type="button" className="text-xs text-rose-700 hover:underline" onClick={() => set(c.k, null)}>Limpar</button> : null}
+              </div>
             ) : c.tipo === "numero" ? (
               <CampoNumero id={id} className="campo" valor={v === null || v === undefined || v === "" ? null : Number(v)} onValor={(n) => set(c.k, n)} />
             ) : (
@@ -322,5 +334,81 @@ function ListaHistorico({ registos }: { registos: { quando: string; accao: strin
         </li>
       ))}
     </ul>
+  );
+}
+
+/** Carrega uma imagem, reduz para 256 px (JPEG) e guarda como data URL. */
+function CampoImagem({ id, valor, onChange }: { id: string; valor: string | null; onChange: (v: string | null) => void }) {
+  const [erro, setErro] = useState("");
+  async function ler(f: File | undefined) {
+    setErro("");
+    if (!f) return;
+    if (!f.type.startsWith("image/")) return setErro("Escolha um ficheiro de imagem.");
+    try {
+      const bmp = await createImageBitmap(f);
+      const k = Math.min(1, 256 / Math.max(bmp.width, bmp.height));
+      const c = document.createElement("canvas");
+      c.width = Math.max(1, Math.round(bmp.width * k));
+      c.height = Math.max(1, Math.round(bmp.height * k));
+      c.getContext("2d")!.drawImage(bmp, 0, 0, c.width, c.height);
+      onChange(c.toDataURL("image/jpeg", 0.85));
+    } catch {
+      setErro("Não foi possível ler a imagem.");
+    }
+  }
+  return (
+    <div className="flex items-center gap-3">
+      {valor ? <img src={valor} alt="Amostra" className="h-16 w-16 rounded border border-slate-300 object-cover" /> : <span className="flex h-16 w-16 items-center justify-center rounded border border-dashed border-slate-300 text-xs text-slate-400">sem</span>}
+      <div className="space-y-1">
+        <input id={id} type="file" accept="image/*" className="text-sm" onChange={(e) => ler(e.target.files?.[0])} />
+        {valor && <button type="button" className="block text-xs text-rose-700 hover:underline" onClick={() => onChange(null)}>Remover amostra</button>}
+        {erro && <p className="text-xs text-rose-700">{erro}</p>}
+      </div>
+    </div>
+  );
+}
+
+/** Importa o ficheiro JSON exportado da app «Amostras Catálogo FAMO» (liga as amostras pela referência). */
+function ImportarAmostras({ onFeito }: { onFeito: () => void }) {
+  const [amostras, setAmostras] = useState<unknown[] | null>(null);
+  const [nome, setNome] = useState("");
+  const [resultado, setResultado] = useState("");
+  async function ler(f: File | undefined) {
+    setResultado("");
+    if (!f) return;
+    try {
+      const j = JSON.parse(await f.text());
+      const lista = Array.isArray(j) ? j : j?.amostras;
+      if (!Array.isArray(lista) || !lista.length) throw new Error();
+      setNome(f.name);
+      setAmostras(lista);
+    } catch {
+      alert("O ficheiro não é uma exportação de amostras válida (falta a lista «amostras»).");
+    }
+  }
+  return (
+    <>
+      <label className="btn-secundario cursor-pointer whitespace-nowrap">
+        Importar amostras (JSON)
+        <input type="file" accept="application/json,.json" className="hidden" onChange={(e) => { ler(e.target.files?.[0]); e.target.value = ""; }} />
+      </label>
+      {resultado && <p className="w-full text-sm text-slate-700" role="status">{resultado}</p>}
+      <DialogoMotivo
+        aberto={!!amostras}
+        titulo="Importar amostras"
+        descricao={`${amostras?.length ?? 0} amostra(s) do ficheiro ${nome}. As imagens e cores são ligadas às referências existentes (sem contar espaços).`}
+        motivoPadrao="Actualização das amostras do catálogo FAMO"
+        onFechar={() => setAmostras(null)}
+        onConfirmar={async (motivo) => {
+          const { data, error } = await supabase().rpc("importar_amostras", { p_amostras: amostras, p_motivo: motivo });
+          if (error) return error.message;
+          const r = data as { ligadas: number; sem_referencia: { ref: string }[] };
+          setResultado(`${r.ligadas} amostra(s) ligadas.${r.sem_referencia.length ? ` Sem referência na base de dados: ${r.sem_referencia.map((x) => x.ref).join(", ")}.` : ""}`);
+          setAmostras(null);
+          onFeito();
+          return null;
+        }}
+      />
+    </>
   );
 }

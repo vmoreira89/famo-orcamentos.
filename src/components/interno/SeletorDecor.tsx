@@ -2,7 +2,19 @@
 
 import { useId, useMemo, useRef, useState } from "react";
 
-export type Decor = { referencia: string; descricao: string; grupo: string };
+export type Decor = { referencia: string; descricao: string; grupo: string; amostra?: string | null; cor?: string | null };
+
+/** Quadradinho com a amostra (imagem ou cor) de um decor. */
+export function Amostra({ d, tam = 28 }: { d?: Decor | null; tam?: number }) {
+  if (!d || (!d.amostra && !d.cor)) return <span className="inline-block shrink-0 rounded border border-dashed border-slate-300 bg-white" style={{ width: tam, height: tam }} title="Sem amostra" />;
+  return (
+    <span
+      className="inline-block shrink-0 rounded border border-slate-300 bg-cover bg-center"
+      style={{ width: tam, height: tam, backgroundColor: d.cor ?? undefined, backgroundImage: d.amostra ? `url(${d.amostra})` : undefined }}
+      title={`${d.referencia}${d.descricao ? ` · ${d.descricao}` : ""}`}
+    />
+  );
+}
 
 const norm = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/\s+/g, "");
 
@@ -28,7 +40,8 @@ export default function SeletorDecor({ decors, valor, pode, onChange }: { decors
     return [...r].sort((a, b) => Number(!norm(a.referencia).startsWith(q)) - Number(!norm(b.referencia).startsWith(q))).slice(0, 60);
   }, [decors, q, texto]);
 
-  const desc = decors.find((d) => d.referencia === valor)?.descricao;
+  const escolhido = decors.find((d) => d.referencia === valor);
+  const desc = escolhido?.descricao;
   const escolher = (ref: string) => {
     acabouDeEscolher.current = true;
     onChange(ref);
@@ -47,6 +60,8 @@ export default function SeletorDecor({ decors, valor, pode, onChange }: { decors
 
   return (
     <div className="relative">
+      <div className="flex items-center gap-2">
+      {valor && <Amostra d={escolhido} tam={34} />}
       <input
         className="campo"
         disabled={!pode}
@@ -75,6 +90,7 @@ export default function SeletorDecor({ decors, valor, pode, onChange }: { decors
           else if (e.key === "Escape") { setTexto(null); (e.target as HTMLInputElement).blur(); }
         }}
       />
+      </div>
       {texto != null && (
         <ul id={`${id}-lista`} ref={lista} role="listbox" className="absolute z-20 mt-1 max-h-64 w-full overflow-auto rounded-md border border-slate-200 bg-white text-sm shadow-lg">
           {resultados.length === 0 && <li className="px-3 py-2 text-slate-500">Nenhuma referência encontrada.</li>}
@@ -87,8 +103,13 @@ export default function SeletorDecor({ decors, valor, pode, onChange }: { decors
               onMouseDown={(e) => { e.preventDefault(); escolher(d.referencia); (document.activeElement as HTMLElement)?.blur(); }}
               onMouseEnter={() => setActivo(i)}
             >
-              {d.referencia}
-              {d.descricao && d.descricao !== d.referencia && <span className="text-slate-500"> · {d.descricao}</span>}
+              <span className="flex items-center gap-2">
+                {(d.amostra || d.cor) && <Amostra d={d} tam={18} />}
+                <span>
+                  {d.referencia}
+                  {d.descricao && d.descricao !== d.referencia && <span className="text-slate-500"> · {d.descricao}</span>}
+                </span>
+              </span>
             </li>
           ))}
         </ul>

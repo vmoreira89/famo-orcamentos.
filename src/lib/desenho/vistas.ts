@@ -218,7 +218,8 @@ export function vistaIso(paineis: PainelMundo[]): Vista {
     const frente: [number, number][] = [iso(x, y, z), iso(x + w, y, z), iso(x + w, y + h, z), iso(x, y + h, z)];
     const topo: [number, number][] = [iso(x, y + h, z), iso(x + w, y + h, z), iso(x + w, y + h, z + d), iso(x, y + h, z + d)];
     const lado: [number, number][] = [iso(x + w, y, z), iso(x + w, y, z + d), iso(x + w, y + h, z + d), iso(x + w, y + h, z)];
-    ents.push({ t: "poligono", pts: lado, preenchido: true }, { t: "poligono", pts: topo, preenchido: true }, { t: "poligono", pts: frente, preenchido: p.tipo !== "puxador" });
+    const tx = p.decor || undefined;
+    ents.push({ t: "poligono", pts: lado, preenchido: true, textura: tx }, { t: "poligono", pts: topo, preenchido: true, textura: tx }, { t: "poligono", pts: frente, preenchido: p.tipo !== "puxador", textura: p.tipo === "puxador" ? undefined : tx });
   }
   return limites(ents);
 }
@@ -303,6 +304,7 @@ export function paineisTampo(moveis: Movel[], t?: Tampo | null): PainelMundo[] {
     h: t.espessura,
     d: t.profundidade,
     ref: t.codigo,
+    decor: t.acabamento || undefined,
   }));
 }
 

@@ -10,7 +10,7 @@ export { posicoesDobradica };
 export type Entidade =
   | { t: "linha"; x1: number; y1: number; x2: number; y2: number; tracejado?: boolean; fina?: boolean }
   | { t: "circulo"; x: number; y: number; r: number; cruz?: boolean }
-  | { t: "poligono"; pts: [number, number][]; preenchido?: boolean }
+  | { t: "poligono"; pts: [number, number][]; preenchido?: boolean; textura?: string } // textura: referência do acabamento (pts[0], pts[1] e pts[3] definem o paralelogramo)
   | { t: "texto"; x: number; y: number; txt: string; alt?: number; ang?: number; centro?: boolean }
   | { t: "cota"; x1: number; y1: number; x2: number; y2: number; off: number; txt?: string };
 

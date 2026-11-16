@@ -48,8 +48,15 @@ export default function DialogoDesenhos({
     setEstado("A preparar…");
     try {
       const { gerarPacote } = await import("@/lib/desenho/pacote");
+      const { chaveDecor } = await import("@/lib/desenho/pdf");
+      // amostras dos acabamentos (imagem ou cor), para pintar as perspectivas
+      setEstado("A ler amostras dos acabamentos…");
+      const { data: am } = await supabase().from("acabamentos").select("referencia,descricao,amostra,cor").or("amostra.not.is.null,cor.not.is.null").limit(2000);
+      const amostras = Object.fromEntries(
+        ((am as { referencia: string; descricao: string | null; amostra: string | null; cor: string | null }[]) ?? []).map((a) => [chaveDecor(a.referencia), { referencia: a.referencia, descricao: a.descricao ?? "", img: a.amostra, cor: a.cor }]),
+      );
       const agora = new Date();
-      const ctx = { numero, data: agora.toLocaleDateString("pt-PT"), desenhou: autor, processo: referencia };
+      const ctx = { numero, data: agora.toLocaleDateString("pt-PT"), desenhou: autor, processo: referencia, amostras };
       const { blob, lista } = await gerarPacote(numero, divisoes, moveis, op, ctx, (f, t) => setEstado(`A gerar ficheiros… ${f}/${t}`), tampos);
       const carimbo = agora.toISOString().slice(0, 16).replace(/[-:T]/g, "");
       const nome = `${numero}_desenhos_${carimbo}.zip`;

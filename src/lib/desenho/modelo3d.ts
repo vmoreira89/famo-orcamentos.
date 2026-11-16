@@ -5,7 +5,7 @@
  */
 import type { Movel } from "../orcamento";
 import { TIPOS_MOVEL } from "../orcamento";
-import { comprimentoCorredica, disposicaoPortas } from "../orcamento";
+import { comprimentoCorredica, disposicaoPortas, especPorta } from "../orcamento";
 
 /** Posições das dobradiças ao longo da porta (a 100 mm dos topos). */
 export function posicoesDobradica(altura: number): number[] {
@@ -23,7 +23,21 @@ export type Painel = {
   x: number; y: number; z: number; // canto (mín.)
   w: number; h: number; d: number; // dimensões em x, y, z
   ref?: string; // código da peça (para balões)
+  decor?: string; // referência do acabamento visível (para pintar a perspectiva com a amostra)
 };
+
+/** Acabamento visível de cada painel: corpo, frentes, portas com acabamento próprio, tampo. */
+function comDecor(m: Movel, ps: Painel[]): Painel[] {
+  return ps.map((p) => {
+    if (p.tipo === "puxador" || p.tipo === "pe" || p.tipo === "dobradica" || p.tipo === "corredica") return p;
+    if (p.tipo === "frente") {
+      const n = /^Porta(?: (\d+))?$/.exec(p.nome);
+      return { ...p, decor: n ? especPorta(m, Number(n[1] ?? 1)).acabamento : m.frente.acabamento };
+    }
+    if (p.tipo === "rodape") return { ...p, decor: m.frente.acabamento };
+    return { ...p, decor: m.corpo.acabamento };
+  });
+}
 
 const E = 19;
 const FOLGA = 3;
@@ -86,7 +100,7 @@ export function modelo3d(m: Movel): Painel[] {
   const L = m.L, A = m.A, P = m.P, ec = m.costa_e;
   const y0 = alturaPes(m);
   const ps: Painel[] = [];
-  if (m.tipo === "tampo") return [{ nome: "Tampo", tipo: "tampo", x: 0, y: 0, z: 0, w: L, h: A, d: P, ref: m.pecas[0]?.codigo }];
+  if (m.tipo === "tampo") return [{ nome: "Tampo", tipo: "tampo", x: 0, y: 0, z: 0, w: L, h: A, d: P, ref: m.pecas[0]?.codigo, decor: m.corpo.acabamento }];
   const ref = (nome: string) => m.pecas.find((p) => p.designacao.toLowerCase().startsWith(nome.toLowerCase()))?.codigo;
   // costa aplicada (por trás, a toda a medida) ou encastrada (entre lados, fundo e cúpula)
   const aplicada = ec > 0 && (m.checklist.costa ?? "").toLowerCase().startsWith("aplicada");
@@ -144,7 +158,7 @@ export function modelo3d(m: Movel): Painel[] {
     if (m.rodape_tipo !== "sem") ps.push({ nome: "Rodapé", tipo: "rodape", x: 0, y: 0, z: RECUO_RODAPE, w: L, h: y0 - 2, d: E, ref: ref("Rodapé") });
     for (const x of [60, L - 60]) for (const z of [90, P - 60]) ps.push({ nome: "Pé", tipo: "pe", x: x - 20, y: 0, z: z - 20, w: 40, h: y0, d: 40 });
   }
-  return ps;
+  return comDecor(m, ps);
 }
 
 /* ------------------------------------------------------------------ projecção isométrica */
