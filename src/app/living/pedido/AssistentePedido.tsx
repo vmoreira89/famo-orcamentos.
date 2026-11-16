@@ -3,6 +3,7 @@
 import { useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import CampoNumero from "@/components/CampoNumero";
 import {
   DESCRITIVO_COMUM,
   DESCRITIVO_POR_TIPO,
@@ -32,7 +33,7 @@ function novaVariante(tipo: TipoDivisao, indice: number): VarianteDivisao {
     tipo,
     designacao: `${d.prefixo} ${letra(indice)}`,
     quantidade: 1,
-    material: "",
+    materiais: [],
     mdf: "",
     requer_desenho: null,
     descritivo: {},
@@ -123,8 +124,8 @@ export default function AssistentePedido({ interno = false }: { interno?: boolea
       variantes.forEach((v) => {
         if (!v.designacao.trim()) e.push("Todas as divisões precisam de uma designação.");
         if (!v.quantidade || v.quantidade < 1) e.push(`${v.designacao}: indique a quantidade.`);
-        if (!v.material) e.push(`${v.designacao}: escolha o material.`);
-        if (v.material && precisaMdf(v.material) && !v.mdf) e.push(`${v.designacao}: escolha o tipo de MDF.`);
+        if (v.materiais.length === 0) e.push(`${v.designacao}: escolha pelo menos um material.`);
+        if (v.materiais.some(precisaMdf) && !v.mdf) e.push(`${v.designacao}: escolha o tipo de MDF.`);
         if (v.requer_desenho === null) e.push(`${v.designacao}: indique se pretende desenho.`);
       });
     }
@@ -168,8 +169,9 @@ export default function AssistentePedido({ interno = false }: { interno?: boolea
         tipo: v.tipo,
         designacao: v.designacao,
         quantidade: v.quantidade,
-        material: v.material,
-        mdf: v.mdf,
+        material: v.materiais[0],
+        materiais: v.materiais,
+        mdf: v.materiais.some(precisaMdf) ? v.mdf : "",
         acabamento: v.descritivo.acabamento_ref ?? "",
         requer_desenho: v.requer_desenho,
         descritivo: v.descritivo,
@@ -339,8 +341,8 @@ export default function AssistentePedido({ interno = false }: { interno?: boolea
                   <td className="py-2 font-medium">{v.designacao}</td>
                   <td>{v.quantidade}</td>
                   <td>
-                    {MATERIAIS.find((m) => m.id === v.material)?.nome}
-                    {v.mdf && ` · ${MDFS.find((m) => m.id === v.mdf)?.nome}`}
+                    {v.materiais.map((x) => MATERIAIS.find((m) => m.id === x)?.nome).join(" + ")}
+                    {v.mdf && v.materiais.some(precisaMdf) && ` · ${MDFS.find((m) => m.id === v.mdf)?.nome}`}
                   </td>
                   <td>{v.requer_desenho ? "Sim" : "Não"}</td>
                   <td>{v.ficheiros.length}</td>
@@ -406,14 +408,7 @@ function CartaoVariante({
         </div>
         <div className="w-28">
           <label className="rotulo" htmlFor={id("qtd")}>Quantidade *</label>
-          <input
-            id={id("qtd")}
-            type="number"
-            min={1}
-            className="campo"
-            value={v.quantidade}
-            onChange={(e) => onAlterar({ quantidade: Math.max(1, parseInt(e.target.value || "1", 10)) })}
-          />
+          <CampoNumero id={id("qtd")} className="campo" valor={v.quantidade} onValor={(n) => onAlterar({ quantidade: Math.max(1, Math.round(n ?? 1)) })} />
         </div>
         {podeRemover && (
           <button type="button" className="text-sm text-rose-700 hover:underline" onClick={onRemover}>
@@ -423,16 +418,23 @@ function CartaoVariante({
       </div>
 
       <div>
-        <p className="rotulo">Material a usar *</p>
+        <p className="rotulo">Material a usar * <span className="font-normal text-slate-500">(pode escolher mais do que um)</span></p>
         <div className="flex flex-wrap gap-2">
           {MATERIAIS.map((m) => (
-            <Opcao key={m.id} activo={v.material === m.id} onClick={() => onAlterar({ material: m.id, mdf: precisaMdf(m.id) ? v.mdf : "" })}>
+            <Opcao
+              key={m.id}
+              activo={v.materiais.includes(m.id)}
+              onClick={() => {
+                const ms = v.materiais.includes(m.id) ? v.materiais.filter((x) => x !== m.id) : MATERIAIS.map((x) => x.id).filter((x) => x === m.id || v.materiais.includes(x));
+                onAlterar({ materiais: ms, mdf: ms.some(precisaMdf) ? v.mdf : "" });
+              }}
+            >
               {m.nome}
               {m.nota && <span className="ml-1 font-normal opacity-70">({m.nota})</span>}
             </Opcao>
           ))}
         </div>
-        {v.material && precisaMdf(v.material) && (
+        {v.materiais.some(precisaMdf) && (
           <div className="mt-3">
             <p className="rotulo">Tipo de MDF *</p>
             <div className="flex flex-wrap gap-2">

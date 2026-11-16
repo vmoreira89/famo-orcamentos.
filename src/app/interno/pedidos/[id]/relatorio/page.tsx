@@ -4,8 +4,8 @@ import { Suspense, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
-import { nomeDivisao, nomeMaterial, type Divisao, type Pedido, type Permissoes } from "@/lib/pedido";
-import { calcularTotais, codigoProduto, custoPeca, euro, type DadosOrcamento, type Parametros } from "@/lib/orcamento";
+import { nomeDivisao, nomeMaterial, nomeMateriais, type Divisao, type Pedido, type Permissoes } from "@/lib/pedido";
+import { calcularTotais, codigoProduto, custoOperacao, custoPeca, euro, nPecasMovel, type DadosOrcamento, type Parametros } from "@/lib/orcamento";
 
 type Orc = { versao: number; dados: DadosOrcamento; parametros: Parametros; margem_pct: number; calculado_em: string; pendentes: number };
 
@@ -119,7 +119,7 @@ function Relatorio() {
               {d.designacao} · {nomeDivisao(d.tipo)} <span className="font-mono text-xs font-normal text-slate-500">{codigoProduto(pedido.numero_projecto, d)}</span>
             </h2>
             <p className="mt-1 text-xs text-slate-600">
-              {nomeMaterial(d.material)}{d.descritivo?.acabamento_ref ? ` · ${d.descritivo.acabamento_ref}` : ""} · quantidade: {d.quantidade}
+              {nomeMateriais(d)}{d.descritivo?.acabamento_ref ? ` · ${d.descritivo.acabamento_ref}` : ""} · quantidade: {d.quantidade}
             </p>
             <table className="mt-2 w-full text-left text-sm">
               <thead className="border-b text-xs uppercase text-slate-500">
@@ -199,7 +199,7 @@ function Relatorio() {
                       </tbody>
                     </table>
                     <p className="mt-1">
-                      Operações: {mv.operacoes.map((o) => `${o.descricao} ${o.minutos} min`).join(" · ")}
+                      Operações: {mv.operacoes.map((o) => `${o.descricao} ${o.por_peca ? `${nPecasMovel(mv)} pç × ${o.minutos} min` : `${o.minutos} min`}`).join(" · ")}
                       {mv.extras.length > 0 && <> · Extras: {mv.extras.map((x) => `${x.descricao} ${euro(x.valor)}`).join(" · ")}</>}
                     </p>
                     <p className="mt-1 font-medium">
@@ -279,14 +279,14 @@ async function gerarExcel(
     const wf = wb.addWorksheet("Ferragens");
     wf.addRow(["Móvel", "Ref. FAMO", "Descrição", "Qtd", "Preço un.", "Total"]).font = { bold: true };
     const wo = wb.addWorksheet("Operações");
-    wo.addRow(["Móvel", "Posto", "Descrição", "Minutos", "€/min", "Total"]).font = { bold: true };
+    wo.addRow(["Móvel", "Posto", "Descrição", "Nº peças", "Minutos (por peça)", "€/min", "Total"]).font = { bold: true };
     for (const mv of orc.dados.moveis) {
       for (const p of mv.pecas) {
         const c = custoPeca(p);
         wp.addRow([mv.codigo, p.codigo, p.codigo_sub ?? p.subconjunto, p.designacao, p.qtd, p.c, p.l, p.e, p.sup, p.preco_m2, p.preco_extra_m2, p.preco_orla_ml, Math.round((c.material + c.orla) * 100) / 100, p.nota]);
       }
       for (const f of mv.ferragens) wf.addRow([mv.codigo, f.ref_famo, f.descricao, f.qtd, f.preco, f.preco == null ? null : f.qtd * f.preco]);
-      for (const o of mv.operacoes) wo.addRow([mv.codigo, o.posto, o.descricao, o.minutos, o.custo_minuto ?? orc.parametros.custo_minuto, o.minutos * (o.custo_minuto ?? orc.parametros.custo_minuto)]);
+      for (const o of mv.operacoes) wo.addRow([mv.codigo, o.posto, o.descricao, o.por_peca ? nPecasMovel(mv) : null, o.minutos, o.custo_minuto ?? orc.parametros.custo_minuto, Math.round(custoOperacao(o, nPecasMovel(mv), orc.parametros.custo_minuto) * 100) / 100]);
     }
     [wp, wf, wo].forEach((w) => w.columns.forEach((c) => (c.width = 16)));
   }

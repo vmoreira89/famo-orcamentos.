@@ -14,7 +14,10 @@ import {
   codigoProduto,
   codigos,
   arestasOrla,
+  aplicarOrlas,
+  custoOperacao,
   custoPeca,
+  nPecasMovel,
   decompor,
   euro,
   novoMovel,
@@ -33,8 +36,11 @@ import {
   type TipoMovel,
 } from "@/lib/orcamento";
 import DialogoMotivo from "@/components/DialogoMotivo";
+import CampoNumero from "@/components/CampoNumero";
 import { disposicao, paineisTampo } from "@/lib/desenho/vistas";
 import DialogoDesenhos from "@/components/interno/DialogoDesenhos";
+import DialogoLeitura from "@/components/interno/DialogoLeitura";
+import type { PropostaMovel } from "@/lib/leitura";
 import { eOrcamentista, usePerfil } from "@/components/interno/ContextoInterno";
 
 type LinhaOrc = { versao: number; dados: DadosOrcamento; parametros: Parametros; margem_pct: number };
@@ -47,7 +53,7 @@ export default function EditorOrcamento() {
   const [perm, setPerm] = useState<Permissoes | null>(null);
   const [cat, setCat] = useState<Catalogo | null>(null);
   const [grupos, setGrupos] = useState<string[]>([]);
-  const [decors, setDecors] = useState<{ referencia: string; descricao: string }[]>([]);
+  const [decors, setDecors] = useState<Decor[]>([]);
   const [dados, setDados] = useState<DadosOrcamento>({ moveis: [], extras_gerais: [] });
   const [par, setPar] = useState<Parametros | null>(null);
   const [margem, setMargem] = useState(0);
@@ -58,26 +64,39 @@ export default function EditorOrcamento() {
   const [desenhos, setDesenhos] = useState(false);
   const perfil = usePerfil();
   const [aberto, setAberto] = useState<string | null>(null);
+  const [nFicheiros, setNFicheiros] = useState<Record<string, number>>({});
+  const [leitura, setLeitura] = useState<Divisao | null>(null);
   const [erro, setErro] = useState("");
 
   const carregar = useCallback(async () => {
     const sb = supabase();
-    const [p, d, o, pm, c, g, ac] = await Promise.all([
+    const [p, d, o, pm, c, g, ac, gl, fi] = await Promise.all([
       sb.from("pedidos").select("*").eq("id", id).single(),
       sb.from("pedido_divisoes").select("*").eq("pedido_id", id).order("ordem"),
       sb.from("orcamentos").select("versao,dados,parametros,margem_pct").eq("pedido_id", id).maybeSingle(),
       sb.rpc("minhas_permissoes", { p_id: id }),
       carregarCatalogo(),
       listaGrupos(),
-      sb.from("acabamentos").select("referencia,descricao").in("tipo", ["Laminado", "Termolaminado"]).eq("ativo", true).order("referencia").limit(2000),
+      sb.from("acabamentos").select("referencia,descricao,grupo_id").or("tipo.ilike.lam%,tipo.ilike.termolam%,grupo_id.not.is.null").eq("ativo", true).order("referencia").limit(3000),
+      sb.from("grupos_laminado").select("id,codigo"),
+      sb.from("pedido_ficheiros").select("divisao_id").eq("pedido_id", id),
     ]);
+    const nf: Record<string, number> = {};
+    for (const f of (fi.data as { divisao_id: string | null }[]) ?? []) nf[f.divisao_id ?? "geral"] = (nf[f.divisao_id ?? "geral"] ?? 0) + 1;
+    setNFicheiros(nf);
+    const codGrupo = Object.fromEntries((((gl.data as { id: string; codigo: string }[]) ?? [])).map((x) => [x.id, x.codigo]));
     if (p.error) return setErro("Pedido não encontrado.");
     setPedido(p.data as Pedido);
     setDivisoes((d.data as Divisao[]) ?? []);
     setPerm(pm.data as Permissoes);
     setCat(c);
     setGrupos(g);
-    setDecors((ac.data as { referencia: string; descricao: string }[]) ?? []);
+    const vistos = new Set<string>();
+    setDecors(
+      ((ac.data as { referencia: string; descricao: string; grupo_id: string | null }[]) ?? [])
+        .filter((x) => x.referencia && !vistos.has(x.referencia) && vistos.add(x.referencia))
+        .map((x) => ({ referencia: x.referencia, descricao: x.descricao, grupo: x.grupo_id ? codGrupo[x.grupo_id] ?? "" : "" })),
+    );
     const orc = o.data as LinhaOrc | null;
     if (orc) {
       setDados({ moveis: orc.dados.moveis ?? [], extras_gerais: orc.dados.extras_gerais ?? [], tampos: orc.dados.tampos ?? {} });
@@ -131,6 +150,17 @@ export default function EditorOrcamento() {
 
   function propor(div: Divisao) {
     const novos = proporMoveis(div).map((m) => decompor(m, cat!));
+    alterar((d) => ({ ...d, moveis: [...d.moveis, ...novos] }));
+  }
+  /** Acrescenta os móveis lidos dos ficheiros de apoio (já revistos pelo orçamentista). */
+  function acrescentarLidos(div: Divisao, ps: PropostaMovel[]) {
+    const cont: Partial<Record<TipoMovel, number>> = {};
+    for (const m of dados.moveis) if (m.divisao_id === div.id) cont[m.tipo] = (cont[m.tipo] ?? 0) + 1;
+    const novos = ps.map((p) => {
+      cont[p.tipo] = (cont[p.tipo] ?? 0) + 1;
+      const m = novoMovel(div, p.tipo, cont[p.tipo]!);
+      return decompor({ ...m, designacao: p.designacao || m.designacao, qtd: Math.max(1, p.qtd), L: p.L, P: p.P, A: p.A, portas: p.portas, gavetas: p.gavetas, notas: p.origem.slice(0, 200) }, cat!);
+    });
     alterar((d) => ({ ...d, moveis: [...d.moveis, ...novos] }));
   }
   function acrescentar(div: Divisao, tipo: TipoMovel) {
@@ -215,7 +245,7 @@ export default function EditorOrcamento() {
         <div>
           <label className="text-xs uppercase text-slate-500" htmlFor="margem">Margem</label>
           <div className="mt-1 flex items-center gap-1">
-            <input id="margem" type="number" step="0.5" className="campo w-24" disabled={!pode} value={margem} onChange={(e) => { setMargem(Number(e.target.value)); setSujo(true); }} />
+            <CampoNumero id="margem" className="campo w-24" disabled={!pode} valor={margem} onValor={(v) => { setMargem(v ?? 0); setSujo(true); }} />
             <span className="text-sm">%</span>
           </div>
         </div>
@@ -253,7 +283,12 @@ export default function EditorOrcamento() {
               </div>
               {pode && (
                 <div className="flex flex-wrap gap-2">
-                  {moveis.length === 0 && <button className="btn-primario" onClick={() => propor(div)}>Propor móveis a partir do pedido</button>}
+                  {(nFicheiros[div.id] ?? 0) + (nFicheiros.geral ?? 0) > 0 && (
+                    <button className={moveis.length === 0 ? "btn-primario" : "btn-secundario"} onClick={() => setLeitura(div)}>
+                      Ler ficheiros de apoio ({(nFicheiros[div.id] ?? 0) + (nFicheiros.geral ?? 0)})
+                    </button>
+                  )}
+                  {moveis.length === 0 && <button className={(nFicheiros[div.id] ?? 0) + (nFicheiros.geral ?? 0) > 0 ? "btn-secundario" : "btn-primario"} onClick={() => propor(div)}>Propor a partir do descritivo</button>}
                   <select
                     className="campo w-auto"
                     aria-label="Acrescentar móvel"
@@ -275,6 +310,7 @@ export default function EditorOrcamento() {
                 tampo={tamposComCodigo[div.id]}
                 custo={totais.porTampo[div.id]}
                 cat={cat}
+                decors={decors}
                 pode={pode}
                 onChange={(t) => alterar((d) => ({ ...d, tampos: { ...(d.tampos ?? {}), [div.id]: t } }))}
               />
@@ -289,6 +325,9 @@ export default function EditorOrcamento() {
                   onAbrir={() => setAberto(aberto === m.id ? null : m.id)}
                   pode={pode}
                   grupos={grupos}
+                  decors={decors}
+                  cat={cat}
+                  custoMinuto={par.custo_minuto}
                   onAlterar={(fn) => alterarMovel(m.id, fn)}
                   onRegenerar={() => alterarMovel(m.id, (x) => decompor(x, cat))}
                   onMover={(dir) => mover(m.id, dir)}
@@ -323,9 +362,6 @@ export default function EditorOrcamento() {
         />
       </section>
 
-      <datalist id="decors">
-        {decors.map((d) => <option key={d.referencia} value={d.referencia}>{d.descricao}</option>)}
-      </datalist>
 
       <DialogoMotivo
         aberto={guardar}
@@ -368,6 +404,8 @@ export default function EditorOrcamento() {
           autor={perfil.nome || perfil.email}
         />
       )}
+
+      {leitura && <DialogoLeitura divisao={leitura} aberto onFechar={() => setLeitura(null)} onAcrescentar={(ps) => acrescentarLidos(leitura, ps)} />}
 
       <DialogoRelatorio aberto={relatorio} onFechar={() => setRelatorio(false)} onEscolher={(tipo, formato) => router.push(`/interno/pedidos/${id}/relatorio?tipo=${tipo}&formato=${formato}`)} />
     </div>
@@ -418,9 +456,11 @@ function CartaoTampo({
   tampo,
   custo,
   cat,
+  decors,
   pode,
   onChange,
 }: {
+  decors: Decor[];
   divisao: Divisao;
   moveis: Movel[];
   tampo: Tampo | undefined;
@@ -479,23 +519,27 @@ function CartaoTampo({
         <div className="border-t border-slate-200 p-4">
           <div className="grid gap-3 sm:grid-cols-4 lg:grid-cols-8">
             <Sel l="Material" v={tampo.material} op={["laminado", "compacto", "madeira", "pedra", "outro"]} rot={{ laminado: "Laminado", compacto: "Compacto", madeira: "Madeira", pedra: "Pedra / quartzo", outro: "Outro" }} on={(v) => set("material", v as Tampo["material"])} pode={pode} semVazio />
+            {tampo.material === "laminado" && (
+              <Sel l="Grupo" v={tampo.grupo ?? ""} op={Array.from(new Set(cat.gruposPreco.map((g) => g.grupo))).filter(Boolean).sort()} on={(v) => onChange(precosTampo({ ...tampo, grupo: v, acabamento: v && decors.some((x) => x.referencia === tampo.acabamento && x.grupo && x.grupo !== v) ? "" : tampo.acabamento }, cat))} pode={pode} />
+            )}
             <div className="sm:col-span-2">
               <label className="rotulo">Decor / referência</label>
-              <input className="campo" list="decors" disabled={!pode} value={tampo.acabamento} onChange={(e) => set("acabamento", e.target.value)} />
+              {tampo.material === "laminado" ? (
+                <SeletorDecor decors={decors} grupo={tampo.grupo ?? ""} valor={tampo.acabamento} pode={pode} onChange={(ref, grupo) => onChange(precosTampo({ ...tampo, acabamento: ref, grupo: tampo.grupo || grupo }, cat))} />
+              ) : (
+                <input className="campo" disabled={!pode} value={tampo.acabamento} onChange={(e) => set("acabamento", e.target.value)} />
+              )}
             </div>
-            {tampo.material === "laminado" && (
-              <Sel l="Grupo (se o decor não tiver)" v={tampo.grupo ?? ""} op={Array.from(new Set(cat.gruposPreco.map((g) => g.grupo))).filter(Boolean).sort()} on={(v) => set("grupo", v)} pode={pode} />
-            )}
             <Num l="Espessura (mm)" v={tampo.espessura} on={(v) => set("espessura", v)} pode={pode} />
             <Num l="Profundidade" v={tampo.profundidade} on={(v) => set("profundidade", v)} pode={pode} />
             <Num l="Saliência frente" v={tampo.saliencia} on={(v) => set("saliencia", v)} pode={pode} />
             <div>
               <label className="rotulo">Comprimento</label>
-              <input type="number" className="campo" disabled={!pode} placeholder={`auto: ${trocos.reduce((s, t) => s + t.comp, 0)}`} value={tampo.comprimento ?? ""} onChange={(e) => set("comprimento", e.target.value === "" ? null : Number(e.target.value))} />
+              <CampoNumero className="campo" disabled={!pode} placeholder={`auto: ${trocos.reduce((s, t) => s + t.comp, 0)}`} valor={tampo.comprimento} onValor={(v) => set("comprimento", v)} />
             </div>
             <div>
               <label className="rotulo" title="Comprimento máximo de cada peça (placa). Só se aplica se não for tampo único.">Máx. por peça</label>
-              <input type="number" className="campo" disabled={!pode || tampo.unico} value={tampo.comp_max_troco || ""} onChange={(e) => set("comp_max_troco", Number(e.target.value))} />
+              <CampoNumero className="campo" disabled={!pode || tampo.unico} valor={tampo.comp_max_troco || null} onValor={(v) => set("comp_max_troco", v ?? 0)} />
             </div>
           </div>
           <label className="mt-3 flex items-center gap-2 text-sm">
@@ -505,12 +549,12 @@ function CartaoTampo({
           <div className="mt-3 grid gap-3 sm:grid-cols-4">
             <div>
               <label className="rotulo">Preço da placa (€/m²)</label>
-              <input type="number" step="any" className={`campo ${semPreco ? "border-amber-400 bg-amber-50" : ""}`} disabled={!pode || tampo.terceiros} value={tampo.preco_m2 ?? ""} onChange={(e) => onChange({ ...tampo, preco_m2: e.target.value === "" ? null : Number(e.target.value) })} />
+              <CampoNumero className={`campo ${semPreco ? "border-amber-400 bg-amber-50" : ""}`} disabled={!pode || tampo.terceiros} valor={tampo.preco_m2} onValor={(v) => onChange({ ...tampo, preco_m2: v })} />
               <p className="mt-1 text-xs text-slate-500">{tampo.material === "laminado" ? "Lido do grupo/decor na espessura indicada; pode ajustar." : "Sem tabela para este material: preencha."}</p>
             </div>
             <div>
               <label className="rotulo">Orla (€/ml)</label>
-              <input type="number" step="any" className="campo" disabled={!pode || tampo.terceiros} value={tampo.preco_orla_ml ?? ""} onChange={(e) => onChange({ ...tampo, preco_orla_ml: e.target.value === "" ? null : Number(e.target.value) })} />
+              <CampoNumero className="campo" disabled={!pode || tampo.terceiros} valor={tampo.preco_orla_ml} onValor={(v) => onChange({ ...tampo, preco_orla_ml: v })} />
               <p className="mt-1 text-xs text-slate-500">Orla em todo o perímetro, como nas outras peças.</p>
             </div>
             <div className="sm:col-span-2">
@@ -556,6 +600,9 @@ function CartaoMovel({
   onAbrir,
   pode,
   grupos,
+  decors,
+  cat,
+  custoMinuto,
   onAlterar,
   onRegenerar,
   onRemover,
@@ -573,6 +620,9 @@ function CartaoMovel({
   onAbrir: () => void;
   pode: boolean;
   grupos: string[];
+  decors: Decor[];
+  cat: Catalogo;
+  custoMinuto: number;
   onAlterar: (fn: (m: Movel) => Movel) => void;
   onRegenerar: () => void;
   onRemover: () => void;
@@ -580,6 +630,12 @@ function CartaoMovel({
 }) {
   const [sep, setSep] = useState<(typeof SEPARADORES)[number]>("Dados");
   const set = <K extends keyof Movel>(k: K, v: Movel[K]) => onAlterar((x) => ({ ...x, [k]: v }));
+  /** Mudar material/orla aplica logo a regra das orlas às peças dessa superfície. */
+  const mudarEspec = (k: "corpo" | "frente", e: EspecMaterial) =>
+    onAlterar((x) => {
+      const n = { ...x, [k]: e };
+      return x[k].material !== e.material || !!x[k].orlar !== !!e.orlar ? aplicarOrlas(n, cat) : n;
+    });
 
   return (
     <div className={`cartao ${custo?.pendentes ? "border-amber-300" : ""}`}>
@@ -639,8 +695,8 @@ function CartaoMovel({
                 <Sel l="Puxador" v={m.puxador} op={["Puxador exterior", "Gola / perfil", "Push-to-open", "Puxador embutido / fresado", "A definir"]} on={(v) => set("puxador", v)} pode={pode} />
               </div>
               <div className="grid gap-4 lg:grid-cols-2">
-                <EditorEspec titulo="Corpo" e={m.corpo} grupos={grupos} pode={pode} on={(e) => set("corpo", e)} />
-                <EditorEspec titulo="Frentes (portas, gavetas, rodapé)" e={m.frente} grupos={grupos} pode={pode} on={(e) => set("frente", e)} />
+                <EditorEspec titulo="Corpo" e={m.corpo} grupos={grupos} decors={decors} pode={pode} on={(e) => mudarEspec("corpo", e)} />
+                <EditorEspec titulo="Frentes (portas, gavetas, rodapé)" e={m.frente} grupos={grupos} decors={decors} pode={pode} on={(e) => mudarEspec("frente", e)} />
               </div>
               <div>
                 <p className="mb-2 text-sm font-semibold">Checklist para o desenho</p>
@@ -666,7 +722,7 @@ function CartaoMovel({
 
           {sep === "Peças" && <TabelaPecas m={m} pode={pode} onAlterar={onAlterar} />}
           {sep === "Ferragens" && <TabelaFerragens m={m} pode={pode} onAlterar={onAlterar} />}
-          {sep === "Operações" && <TabelaOperacoes m={m} pode={pode} onAlterar={onAlterar} />}
+          {sep === "Operações" && <TabelaOperacoes m={m} pode={pode} cm={custoMinuto} onAlterar={onAlterar} />}
           {sep === "Extras" && (
             <>
               <p className="mb-2 text-sm text-slate-600">Operações extra neste móvel que a app não calcula (ex.: fresagem especial, recorte, acabamento manual).</p>
@@ -679,8 +735,31 @@ function CartaoMovel({
   );
 }
 
-function EditorEspec({ titulo, e, grupos, pode, on }: { titulo: string; e: EspecMaterial; grupos: string[]; pode: boolean; on: (e: EspecMaterial) => void }) {
+type Decor = { referencia: string; descricao: string; grupo: string };
+
+/** Lista fixa de decores: os do grupo escolhido ou, sem grupo, todos os laminados. */
+function SeletorDecor({ decors, grupo, valor, pode, onChange }: { decors: Decor[]; grupo: string; valor: string; pode: boolean; onChange: (ref: string, grupo: string) => void }) {
+  const lista = grupo ? decors.filter((d) => d.grupo === grupo) : decors;
+  const foraDaLista = valor && !lista.some((d) => d.referencia === valor);
+  return (
+    <>
+      <select className="campo" disabled={!pode} value={valor} onChange={(e) => onChange(e.target.value, decors.find((d) => d.referencia === e.target.value)?.grupo ?? "")}>
+        <option value="">—</option>
+        {foraDaLista && <option value={valor}>{valor} (fora da lista)</option>}
+        {lista.map((d) => (
+          <option key={d.referencia} value={d.referencia}>
+            {d.referencia}{d.descricao && d.descricao !== d.referencia ? ` · ${d.descricao}` : ""}{!grupo && d.grupo ? ` [${d.grupo}]` : ""}
+          </option>
+        ))}
+      </select>
+      <p className="mt-1 text-xs text-slate-500">{grupo ? `${lista.length} decor(es) do grupo ${grupo}.` : `Todos os laminados (${lista.length}). Escolha um grupo para filtrar.`}</p>
+    </>
+  );
+}
+
+function EditorEspec({ titulo, e, grupos, decors, pode, on }: { titulo: string; e: EspecMaterial; grupos: string[]; decors: Decor[]; pode: boolean; on: (e: EspecMaterial) => void }) {
   const extraRotulo = e.material === "folheado" ? "Folha de madeira (€/m² por face)" : e.material === "lacado" ? "Lacagem (€/m² por face)" : e.material === "madeira" ? "Madeira maciça (€/m²)" : "";
+  const perguntaOrla = e.material === "madeira" || e.material === "folheado";
   return (
     <fieldset className="rounded-md border border-slate-200 p-3">
       <legend className="px-1 text-sm font-semibold">{titulo}</legend>
@@ -689,21 +768,45 @@ function EditorEspec({ titulo, e, grupos, pode, on }: { titulo: string; e: Espec
         {(e.material === "folheado" || e.material === "lacado") && (
           <Sel l="MDF" v={e.mdf} op={MDFS.map((m) => m.id)} rot={Object.fromEntries(MDFS.map((m) => [m.id, m.nome]))} on={(v) => on({ ...e, mdf: v as EspecMaterial["mdf"] })} pode={pode} />
         )}
-        <div>
-          <label className="rotulo">{e.material === "laminado" ? "Decor (referência)" : e.material === "lacado" ? "Cor (RAL / ref.)" : "Folha / madeira"}</label>
-          <input className="campo" list={e.material === "laminado" ? "decors" : undefined} disabled={!pode} value={e.acabamento} onChange={(x) => on({ ...e, acabamento: x.target.value })} />
-        </div>
-        {e.material === "laminado" && (
-          <Sel l="Grupo (se o decor não tiver)" v={e.grupo} op={grupos} on={(v) => on({ ...e, grupo: v })} pode={pode} />
+        {e.material === "laminado" ? (
+          <>
+            <Sel
+              l="Grupo"
+              v={e.grupo}
+              op={grupos}
+              on={(v) => on({ ...e, grupo: v, acabamento: v && decors.some((d) => d.referencia === e.acabamento && d.grupo && d.grupo !== v) ? "" : e.acabamento })}
+              pode={pode}
+            />
+            <div className="sm:col-span-2">
+              <label className="rotulo">Decor (referência)</label>
+              <SeletorDecor decors={decors} grupo={e.grupo} valor={e.acabamento} pode={pode} onChange={(ref, g) => on({ ...e, acabamento: ref, grupo: e.grupo || g })} />
+            </div>
+          </>
+        ) : (
+          <div>
+            <label className="rotulo">{e.material === "lacado" ? "Cor (RAL / ref.)" : "Folha / madeira"}</label>
+            <input className="campo" disabled={!pode} value={e.acabamento} onChange={(x) => on({ ...e, acabamento: x.target.value })} />
+          </div>
         )}
         {extraRotulo && (
           <div>
             <label className="rotulo">{extraRotulo}</label>
-            <input type="number" step="any" className="campo" disabled={!pode} value={e.extra_m2 ?? ""} onChange={(x) => on({ ...e, extra_m2: x.target.value === "" ? null : Number(x.target.value) })} />
+            <CampoNumero className="campo" disabled={!pode} valor={e.extra_m2} onValor={(v) => on({ ...e, extra_m2: v })} />
           </div>
         )}
       </div>
-      {pode && <p className="mt-2 text-xs text-slate-500">Depois de mudar o material, use «Actualizar preços» ou «Regenerar listas».</p>}
+      <div className="mt-2 text-sm">
+        {e.material === "laminado" && <p className="text-xs text-slate-500">Orla em todo o perímetro das peças.</p>}
+        {e.material === "lacado" && <p className="text-xs text-slate-500">Lacado: as peças não levam orla.</p>}
+        {perguntaOrla && (
+          <div className="flex flex-wrap items-center gap-3 rounded bg-sky-50 px-2 py-1.5">
+            <span>Pretende orlar as peças?</span>
+            <label className="flex items-center gap-1"><input type="radio" disabled={!pode} checked={!!e.orlar} onChange={() => on({ ...e, orlar: true })} /> Sim</label>
+            <label className="flex items-center gap-1"><input type="radio" disabled={!pode} checked={!e.orlar} onChange={() => on({ ...e, orlar: false })} /> Não (orla a 0)</label>
+          </div>
+        )}
+      </div>
+      {pode && <p className="mt-2 text-xs text-slate-500">As orlas das peças acompanham logo a mudança de material. Para os preços, use «Actualizar preços» ou «Regenerar listas».</p>}
     </fieldset>
   );
 }
@@ -712,6 +815,8 @@ function EditorEspec({ titulo, e, grupos, pode, on }: { titulo: string; e: Espec
 
 function celula(pode: boolean, v: string | number | null, on: (v: string) => void, tipo: "text" | "number" = "text", largura = "w-20", pendente = false) {
   if (!pode) return <span className={pendente ? "rounded bg-amber-100 px-1" : ""}>{v ?? "—"}</span>;
+  const cls = `rounded border px-1 py-0.5 text-sm ${largura} ${pendente ? "border-amber-400 bg-amber-50" : "border-slate-300"}`;
+  if (tipo === "number") return <CampoNumero className={cls} valor={typeof v === "number" ? v : v == null || v === "" ? null : Number(v)} onValor={(n) => on(n == null ? "" : String(n))} />;
   return (
     <input
       type={tipo}
@@ -845,33 +950,35 @@ function TabelaFerragens({ m, pode, onAlterar }: { m: Movel; pode: boolean; onAl
   );
 }
 
-function TabelaOperacoes({ m, pode, onAlterar }: { m: Movel; pode: boolean; onAlterar: (fn: (m: Movel) => Movel) => void }) {
+function TabelaOperacoes({ m, pode, cm, onAlterar }: { m: Movel; pode: boolean; cm: number; onAlterar: (fn: (m: Movel) => Movel) => void }) {
+  const nP = nPecasMovel(m);
   const setO = (oid: string, k: string, v: unknown) => onAlterar((x) => ({ ...x, operacoes: x.operacoes.map((o) => (o.id === oid ? { ...o, [k]: v } : o)) }));
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-left text-sm">
         <thead className="border-b text-xs uppercase text-slate-500">
-          <tr><th className="py-1">Posto</th><th>Descrição</th><th>Minutos</th><th>€/min</th><th className="text-right">Total</th><th></th></tr>
+          <tr><th className="py-1">Posto</th><th>Descrição</th><th>Nº peças</th><th>Min. por peça</th><th>€/min</th><th className="text-right">Total</th><th></th></tr>
         </thead>
         <tbody>
           {m.operacoes.map((o) => (
             <tr key={o.id} className="border-b last:border-0">
               <td className="py-1">{celula(pode, o.posto, (v) => setO(o.id, "posto", v), "text", "w-28")}</td>
               <td>{celula(pode, o.descricao, (v) => setO(o.id, "descricao", v), "text", "w-56")}</td>
+              <td className="tabular-nums text-slate-600">{o.por_peca ? nP : <span title="Linha antiga: minutos totais do móvel">— (total)</span>}</td>
               <td>{celula(pode, o.minutos, (v) => setO(o.id, "minutos", Number(v)), "number", "w-20")}</td>
               <td>{celula(pode, o.custo_minuto, (v) => setO(o.id, "custo_minuto", numOuNull(v)), "number", "w-16")}</td>
-              <td className="text-right tabular-nums">{euro(o.minutos * (o.custo_minuto ?? 0))}</td>
+              <td className="text-right tabular-nums" title={o.por_peca ? `${nP} peças × ${o.minutos} min × ${o.custo_minuto ?? cm} €/min` : undefined}>{euro(custoOperacao(o, nP, cm))}</td>
               <td>{pode && <button className="text-xs text-rose-700" aria-label="Remover operação" onClick={() => onAlterar((x) => ({ ...x, operacoes: x.operacoes.filter((q) => q.id !== o.id) }))}>✕</button>}</td>
             </tr>
           ))}
         </tbody>
       </table>
       {pode && (
-        <button className="mt-2 text-sm font-medium text-marca hover:underline" onClick={() => onAlterar((x) => ({ ...x, operacoes: [...x.operacoes, { id: uid(), posto: "TRABALHADOR", descricao: "Mão de obra", minutos: 10, custo_minuto: null }] }))}>
+        <button className="mt-2 text-sm font-medium text-marca hover:underline" onClick={() => onAlterar((x) => ({ ...x, operacoes: [...x.operacoes, { id: uid(), posto: "TRABALHADOR", descricao: "Mão de obra", minutos: 1, custo_minuto: null, por_peca: true }] }))}>
           + Operação
         </button>
       )}
-      <p className="mt-1 text-xs text-slate-500">Tempos propostos automaticamente; ajuste conforme a experiência. €/min vazio usa o custo por minuto do orçamento.</p>
+      <p className="mt-1 text-xs text-slate-500">Custo de cada operação = nº de peças do móvel × minutos por peça × €/min. Tempos propostos automaticamente; ajuste conforme a experiência. €/min vazio usa o custo por minuto do orçamento.</p>
     </div>
   );
 }
@@ -909,7 +1016,7 @@ function Num({ l, v, on, pode }: { l: string; v: number; on: (v: number) => void
   return (
     <div>
       <label className="rotulo">{l}</label>
-      <input type="number" className="campo" disabled={!pode} value={Number.isFinite(v) && v !== 0 ? v : v === 0 ? 0 : ""} onChange={(e) => on(e.target.value === "" ? 0 : Number(e.target.value))} />
+      <CampoNumero className="campo" disabled={!pode} valor={v} onValor={(n) => on(n ?? 0)} />
     </div>
   );
 }

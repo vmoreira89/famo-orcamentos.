@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import DialogoMotivo from "@/components/DialogoMotivo";
+import CampoNumero from "@/components/CampoNumero";
 import {
   DESCRITIVO_COMUM,
   DESCRITIVO_POR_TIPO,
@@ -14,6 +15,8 @@ import {
   nomeDivisao,
   nomeFicheiroSeguro,
   nomeMaterial,
+  nomeMateriais,
+  materiaisDe,
   nomeMdf,
   precisaMdf,
   type Comentario,
@@ -122,7 +125,7 @@ type DivisaoEditavel = {
   tipo: TipoDivisao;
   designacao: string;
   quantidade: number;
-  material: Material;
+  materiais: Material[];
   mdf: Mdf | "";
   requer_desenho: boolean;
   descritivo: Record<string, string>;
@@ -133,7 +136,7 @@ const paraEditavel = (v: Divisao): DivisaoEditavel => ({
   tipo: v.tipo,
   designacao: v.designacao,
   quantidade: v.quantidade,
-  material: v.material,
+  materiais: materiaisDe(v),
   mdf: v.mdf ?? "",
   requer_desenho: v.requer_desenho,
   descritivo: v.descritivo ?? {},
@@ -161,7 +164,7 @@ export function SecaoDivisoes({
           <button
             className="text-sm font-medium text-marca hover:underline"
             onClick={() =>
-              setEmEdicao({ id: null, tipo: "cozinha", designacao: "", quantidade: 1, material: "laminado", mdf: "", requer_desenho: false, descritivo: {} })
+              setEmEdicao({ id: null, tipo: "cozinha", designacao: "", quantidade: 1, materiais: ["laminado"], mdf: "", requer_desenho: false, descritivo: {} })
             }
           >
             + Divisão
@@ -195,7 +198,8 @@ export function SecaoDivisoes({
         onFechar={() => setConfirmar(false)}
         onConfirmar={async (m) => {
           if (!emEdicao) return null;
-          const { id, ...dados } = emEdicao;
+          const { id, ...resto } = emEdicao;
+          const dados = { ...resto, material: resto.materiais[0] };
           const e = await rpc("guardar_divisao", { p_pedido: pedidoId, p_divisao: id, p_dados: dados, p_motivo: m });
           if (!e) setEmEdicao(null);
           return e;
@@ -223,7 +227,7 @@ function VistaDivisao({ v, podeEditar, onEditar, onRemover }: { v: Divisao; pode
             {v.quantidade}× {v.designacao} <span className="font-normal text-slate-500">· {nomeDivisao(v.tipo)}</span>
           </p>
           <p className="text-sm text-slate-600">
-            {nomeMaterial(v.material)}
+            {nomeMateriais(v)}
             {v.mdf && ` · ${nomeMdf(v.mdf)}`} · Desenho: {v.requer_desenho ? "sim" : "não"}
           </p>
         </div>
@@ -262,7 +266,7 @@ function EditorDivisao({
   onGuardar: () => void;
 }) {
   const campos = [...(DESCRITIVO_POR_TIPO[d.tipo] ?? []), ...DESCRITIVO_COMUM];
-  const valido = d.designacao.trim() && d.quantidade > 0 && (!precisaMdf(d.material) || d.mdf);
+  const valido = d.designacao.trim() && d.quantidade > 0 && d.materiais.length > 0 && (!d.materiais.some(precisaMdf) || d.mdf);
   return (
     <div className="mb-4 space-y-4 rounded-lg border-2 border-marca/40 bg-marca-claro/30 p-4">
       <div className="grid gap-3 sm:grid-cols-4">
@@ -278,15 +282,27 @@ function EditorDivisao({
         </div>
         <div>
           <label className="rotulo" htmlFor="ed-qtd">Quantidade</label>
-          <input id="ed-qtd" type="number" min={1} className="campo" value={d.quantidade} onChange={(e) => onChange({ ...d, quantidade: Math.max(1, parseInt(e.target.value || "1", 10)) })} />
+          <CampoNumero id="ed-qtd" className="campo" valor={d.quantidade} onValor={(n) => onChange({ ...d, quantidade: Math.max(1, Math.round(n ?? 1)) })} />
         </div>
-        <div>
-          <label className="rotulo" htmlFor="ed-mat">Material</label>
-          <select id="ed-mat" className="campo" value={d.material} onChange={(e) => onChange({ ...d, material: e.target.value as Material, mdf: precisaMdf(e.target.value as Material) ? d.mdf : "" })}>
-            {MATERIAIS.map((m) => <option key={m.id} value={m.id}>{m.nome}</option>)}
-          </select>
-        </div>
-        {precisaMdf(d.material) && (
+        <fieldset className="sm:col-span-2">
+          <legend className="rotulo">Materiais</legend>
+          <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
+            {MATERIAIS.map((m) => (
+              <label key={m.id} className="flex items-center gap-1.5">
+                <input
+                  type="checkbox"
+                  checked={d.materiais.includes(m.id)}
+                  onChange={(e) => {
+                    const ms = MATERIAIS.map((x) => x.id).filter((x) => (x === m.id ? e.target.checked : d.materiais.includes(x)));
+                    onChange({ ...d, materiais: ms, mdf: ms.some(precisaMdf) ? d.mdf : "" });
+                  }}
+                />
+                {m.nome}
+              </label>
+            ))}
+          </div>
+        </fieldset>
+        {d.materiais.some(precisaMdf) && (
           <div>
             <label className="rotulo" htmlFor="ed-mdf">Tipo de MDF</label>
             <select id="ed-mdf" className="campo" value={d.mdf} onChange={(e) => onChange({ ...d, mdf: e.target.value as Mdf })}>
@@ -534,6 +550,7 @@ const ROTULOS: Record<string, string> = {
   designacao: "Designação",
   quantidade: "Quantidade",
   material: "Material",
+  materiais: "Materiais",
   mdf: "MDF",
   tipo: "Tipo",
   requer_desenho: "Desenho",
@@ -552,6 +569,7 @@ function valorLegivel(k: string, v: unknown): string {
   if (v === null || v === undefined || v === "") return "—";
   if (k === "estado") return ESTADOS[v as EstadoPedido]?.nome ?? String(v);
   if (k === "material") return nomeMaterial(String(v));
+  if (k === "materiais" && Array.isArray(v)) return v.map((x) => nomeMaterial(String(x))).join(" + ");
   if (k === "mdf") return nomeMdf(String(v));
   if (k === "tipo") return nomeDivisao(String(v));
   if (typeof v === "boolean") return v ? "sim" : "não";

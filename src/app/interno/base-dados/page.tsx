@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { dataHora } from "@/lib/pedido";
 import DialogoMotivo from "@/components/DialogoMotivo";
+import CampoNumero from "@/components/CampoNumero";
 import { eGestao, usePerfil } from "@/components/interno/ContextoInterno";
 import { TABELAS, type Campo, type ConfigTabela } from "./config";
 import TabelaFiltravel, { type Coluna } from "@/components/TabelaFiltravel";
@@ -266,14 +267,7 @@ function Formulario({
                 {Object.entries(fks[c.k] ?? {}).map(([fid, r]) => <option key={fid} value={fid}>{r}</option>)}
               </select>
             ) : c.tipo === "numero" ? (
-              <input
-                id={id}
-                type="number"
-                step="any"
-                className="campo"
-                value={v === null || v === undefined ? "" : String(v)}
-                onChange={(e) => set(c.k, e.target.value === "" ? null : Number(e.target.value))}
-              />
+              <CampoNumero id={id} className="campo" valor={v === null || v === undefined || v === "" ? null : Number(v)} onValor={(n) => set(c.k, n)} />
             ) : (
               <input id={id} className="campo" value={(v as string) ?? ""} onChange={(e) => set(c.k, e.target.value)} />
             )}

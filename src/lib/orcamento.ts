@@ -7,6 +7,7 @@
  * só "Actualizar preços" (quando o orçamento ainda é editável) os volta a ler.
  */
 import type { Divisao, Material, Mdf, TipoDivisao } from "./pedido";
+import { materiaisDe } from "./pedido";
 
 /* ------------------------------------------------------------------ tipos */
 
@@ -31,7 +32,33 @@ export type EspecMaterial = {
   acabamento: string; // referência do decor / folha / cor
   grupo: string; // grupo de laminado (código), quando laminado
   extra_m2: number | null; // folheado: folha €/m²; lacado: lacagem €/m²; madeira: €/m² (manual)
+  orlar?: boolean; // madeira/folheado: se leva orla (por defeito não); laminado leva sempre; lacado nunca
 };
+
+/** Laminado: orla em todo o perímetro. Lacado: sem orla. Madeira/folheado: só se pedido. */
+export function levaOrla(esp: EspecMaterial) {
+  if (esp.material === "laminado") return true;
+  if (esp.material === "lacado") return false;
+  return !!esp.orlar;
+}
+const ORLA_TODA: [boolean, boolean, boolean, boolean] = [true, true, true, true];
+const SEM_ORLA: [boolean, boolean, boolean, boolean] = [false, false, false, false];
+export function orlasPara(esp: EspecMaterial) {
+  return levaOrla(esp) ? { orlas: [...ORLA_TODA] as typeof ORLA_TODA, oc: 2, ol: 2 } : { orlas: [...SEM_ORLA] as typeof SEM_ORLA, oc: 0, ol: 0 };
+}
+
+/** Volta a aplicar a regra das orlas às peças do móvel (depois de mudar o material). */
+export function aplicarOrlas(m: Movel, cat?: Catalogo): Movel {
+  return {
+    ...m,
+    pecas: m.pecas.map((p) => {
+      if (p.sup === "manual") return p;
+      const esp = p.sup === "frente" ? m.frente : m.corpo;
+      const o = orlasPara(esp);
+      return { ...p, ...o, preco_orla_ml: o.oc ? (cat ? precoOrla(cat, esp) : p.preco_orla_ml ?? null) : p.preco_orla_ml };
+    }),
+  };
+}
 
 export type Peca = {
   id: string;
@@ -61,7 +88,13 @@ export function comprimentoCorredica(P: number, costa: number) {
   const util = P - costa - 10;
   return [600, 550, 500, 450, 400, 350, 300, 250].find((c) => c <= util) ?? 250;
 }
-export type LinhaOperacao = { id: string; posto: string; descricao: string; minutos: number; custo_minuto: number | null };
+/** por_peca: os minutos são por peça e multiplicam pelo nº de peças do móvel (orçamentos antigos: minutos totais). */
+export type LinhaOperacao = { id: string; posto: string; descricao: string; minutos: number; custo_minuto: number | null; por_peca?: boolean };
+
+/** Nº de peças de um móvel (somando quantidades). */
+export const nPecasMovel = (m: Pick<Movel, "pecas">) => m.pecas.reduce((s, p) => s + (p.qtd || 0), 0);
+/** Custo de uma operação: nº de peças × minutos × €/min (ou minutos × €/min nas linhas antigas). */
+export const custoOperacao = (o: LinhaOperacao, nPecas: number, custoMinuto: number) => (o.por_peca ? nPecas : 1) * o.minutos * (o.custo_minuto ?? custoMinuto);
 export type LinhaExtra = { id: string; descricao: string; valor: number | null };
 
 export type Movel = {
@@ -207,9 +240,10 @@ export function movelTampo(t: Tampo, d: Divisao, moveis: Movel[], numero: string
     }
   }
   const orlaMl = pecas.reduce((s, p) => s + (2 * p.c + 2 * p.l) / 1000, 0);
+  const n = Math.max(1, pecas.length);
   const operacoes: LinhaOperacao[] = t.terceiros ? [] : [
-    { id: `op-c-${d.id}`, posto: "L70SEC.01", descricao: "Corte", minutos: r2(pecas.length * 1), custo_minuto: null },
-    { id: `op-o-${d.id}`, posto: "ORLADORA", descricao: "Orladora", minutos: r2(orlaMl * 0.6), custo_minuto: null },
+    { id: `op-c-${d.id}`, posto: "L70SEC.01", descricao: "Corte", minutos: 1, custo_minuto: null, por_peca: true },
+    { id: `op-o-${d.id}`, posto: "ORLADORA", descricao: "Orladora", minutos: r2((orlaMl * 0.6) / n), custo_minuto: null, por_peca: true },
   ];
   return {
     id: `tampo-${d.id}`, divisao_id: d.id, tipo: "tampo", ref: "TB01", designacao: "Tampo de bancada", qtd: 1,
@@ -309,13 +343,15 @@ function tipoPorDefeito(d: TipoDivisao): TipoMovel {
   return d === "cozinha" ? "inferior" : d === "quarto" ? "roupeiro" : d === "wc" ? "wc" : d === "sala_estar" || d === "sala_jantar" ? "estante" : "outro";
 }
 
-export function especDaDivisao(d: Divisao): EspecMaterial {
-  return { material: d.material, mdf: d.mdf ?? "", acabamento: d.descritivo?.acabamento_ref ?? d.acabamento ?? "", grupo: "", extra_m2: null };
+/** Material do corpo (1.º escolhido) ou das frentes (2.º, se houver mais do que um). */
+export function especDaDivisao(d: Divisao, parte: "corpo" | "frente" = "corpo"): EspecMaterial {
+  const ms = materiaisDe(d);
+  const material = (parte === "frente" ? ms[1] ?? ms[0] : ms[0]) ?? "laminado";
+  return { material, mdf: d.mdf ?? "", acabamento: d.descritivo?.acabamento_ref ?? d.acabamento ?? "", grupo: "", extra_m2: null, orlar: false };
 }
 
 export function novoMovel(divisao: Divisao, tipo: TipoMovel, indice: number): Movel {
   const t = TIPOS_MOVEL[tipo];
-  const esp = especDaDivisao(divisao);
   const portaTxt = (divisao.descritivo?.tipo_portas ?? "").toLowerCase();
   const gav = tipo === "gaveteiro" ? 3 : 0;
   const portas = tipo === "gaveteiro" || tipo === "estante" || portaTxt.includes("sem portas") ? 0 : t.L > 600 ? 2 : 1;
@@ -335,8 +371,8 @@ export function novoMovel(divisao: Divisao, tipo: TipoMovel, indice: number): Mo
     tipo_porta: portaTxt.includes("correr") ? "Correr" : "Batente",
     puxador: divisao.descritivo?.puxadores ?? "",
     costa_e: 8,
-    corpo: { ...esp },
-    frente: { ...esp },
+    corpo: especDaDivisao(divisao, "corpo"),
+    frente: especDaDivisao(divisao, "frente"),
     checklist: {},
     pecas: [],
     ferragens: [],
@@ -397,8 +433,7 @@ export function decompor(m: Movel, cat: Catalogo): Movel {
       qtd: 1,
       e,
       sup,
-      oc: 2,
-      ol: 2,
+      ...orlasPara(sup === "frente" ? m.frente : m.corpo),
       subconjunto: "",
       preco_m2: base.m2,
       preco_extra_m2: sup === "costa" ? null : base.extra,
@@ -489,19 +524,21 @@ export function decompor(m: Movel, cat: Catalogo): Movel {
   }
   if (m.tipo === "roupeiro") fs.push(ferr(cat, "03.2.401.01", 2, "Suporte varão"));
 
-  // Operações (minutos por posto)
-  const nPecas = pecas.reduce((s, p) => s + p.qtd, 0);
+  // Operações: minutos por peça (o custo multiplica pelo nº de peças do móvel)
+  const nPecas = Math.max(1, pecas.reduce((s, p) => s + p.qtd, 0));
   const orlaMl = pecas.reduce((s, p) => { const a = arestasOrla(p); return s + (p.qtd * ((Number(a[0]) + Number(a[1])) * p.c + (Number(a[2]) + Number(a[3])) * p.l)) / 1000; }, 0);
-  const op = (posto: string, descricao: string, minutos: number): LinhaOperacao => ({
+  // (valores propostos a partir dos tempos totais habituais; o orçamentista ajusta os minutos por peça)
+  const op = (posto: string, descricao: string, minutosTotais: number): LinhaOperacao => ({
     id: uid(),
     posto,
     descricao: cat.postos[posto]?.nome ?? descricao,
-    minutos: r2(minutos),
+    minutos: r2(minutosTotais / nPecas),
     custo_minuto: cat.postos[posto]?.custo_minuto ?? cat.parametros.custo_minuto,
+    por_peca: true,
   });
   const ops: LinhaOperacao[] = [
     op("L70SEC.01", "Corte", nPecas * 1.0),
-    op("ORLADORA", "Orladora", orlaMl * 0.6),
+    ...(orlaMl > 0 ? [op("ORLADORA", "Orladora", orlaMl * 0.6)] : []),
     op("L40MULTI.01", "Furação / CNC", nPecas * 1.5),
     ...(m.gavetas > 0 ? [op("L13MONT.01", "Pré-montagem gavetas", m.gavetas * 8)] : []),
     op("L10MONT.02", "Montagem", 20 + m.portas * 5 + m.gavetas * 6),
@@ -606,10 +643,8 @@ export function custoMovel(m: Movel, par: Parametros): CustoMovel {
     else ferragens += f.qtd * f.preco;
   }
   let mao = 0;
-  for (const o of m.operacoes) {
-    const cm = o.custo_minuto ?? par.custo_minuto;
-    mao += o.minutos * cm;
-  }
+  const nP = nPecasMovel(m);
+  for (const o of m.operacoes) mao += custoOperacao(o, nP, par.custo_minuto);
   let extras = 0;
   for (const x of m.extras) {
     if (x.valor == null) pend++;
@@ -673,7 +708,7 @@ export const CHECKLIST: { id: string; l: string; opcoes?: string[] }[] = [
   { id: "dobradica", l: "Dobradiças", opcoes: ["Com amortecimento", "Sem amortecimento", "Push-to-open", "A definir"] },
   { id: "corredica", l: "Corrediças de gaveta", opcoes: ["Ocultas c/ amortecimento", "Laterais de esferas", "Blum Tandem/Movento", "A definir"] },
   { id: "abertura", l: "Sentido de abertura das portas", opcoes: ["Esquerda", "Direita", "Dupla", "A definir"] },
-  { id: "costa", l: "Costa", opcoes: ["Encastrada", "Aplicada", "Sem costa", "A definir"] },
+  { id: "costa", l: "Costa", opcoes: ["Encastrada", "Meio fio", "Aplicada", "Sem costa", "A definir"] },
   { id: "montagem", l: "Fixação", opcoes: ["Pés niveladores + rodapé", "Suspenso na parede", "Pousado", "A definir"] },
   { id: "eletro", l: "Electrodoméstico / equipamento integrado" },
   { id: "iluminacao", l: "Iluminação" },

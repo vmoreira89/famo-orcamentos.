@@ -86,7 +86,7 @@ export type VarianteDivisao = {
   tipo: TipoDivisao;
   designacao: string;
   quantidade: number;
-  material: Material | "";
+  materiais: Material[];
   mdf: Mdf | "";
   requer_desenho: boolean | null;
   descritivo: Record<string, string>;
@@ -108,6 +108,12 @@ export const NIVEIS: Record<Nivel, string> = {
 
 export const nomeDivisao = (t: string) => DIVISOES.find((d) => d.id === t)?.nome ?? t;
 export const nomeMaterial = (m: string | null) => MATERIAIS.find((x) => x.id === m)?.nome ?? m ?? "";
+/** Materiais de uma divisão (pedidos antigos só têm um). */
+export const materiaisDe = (d: { material?: Material | null; materiais?: Material[] | null }): Material[] =>
+  d.materiais?.length ? d.materiais : d.material ? [d.material] : [];
+export const nomeMateriais = (d: { material?: Material | null; materiais?: Material[] | null }) =>
+  materiaisDe(d).map((m) => nomeMaterial(m)).join(" + ");
+export const precisaMdfLista = (ms: Material[]) => ms.some(precisaMdf);
 export const nomeMdf = (m: string | null) => MDFS.find((x) => x.id === m)?.nome ?? m ?? "";
 
 export const FORMATO_NUMERO_PROJECTO = /^[0-9]{4,7}\.[0-9]{2}$/;
@@ -139,7 +145,8 @@ export type Divisao = {
   tipo: TipoDivisao;
   designacao: string;
   quantidade: number;
-  material: Material;
+  material: Material; // o primeiro dos materiais (compatibilidade)
+  materiais?: Material[];
   mdf: Mdf | null;
   acabamento: string | null;
   requer_desenho: boolean;

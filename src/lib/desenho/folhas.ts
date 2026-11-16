@@ -1,6 +1,6 @@
 import type { PDFDocument } from "pdf-lib";
 import type { Divisao } from "../pedido";
-import { nomeDivisao, nomeMaterial, nomeMdf } from "../pedido";
+import { nomeDivisao, nomeMaterial, nomeMateriais, nomeMdf } from "../pedido";
 import { arestasOrla, movelTampo, type EspecMaterial, type Movel, type Peca, type Tampo } from "../orcamento";
 import { deslocar, furacao, juntar, legendaFuros, limites, rect, vistaPeca, type Entidade } from "./geometria";
 import { puxadorDe, frentesDoMovel, iso, type Painel } from "./modelo3d";
@@ -194,7 +194,7 @@ export async function pdfConjunto(mod: Modelos, d: Divisao, moveis: Movel[], cod
     subtitulo: `${moveis.length} móveis · quantidade ${d.quantidade}`,
     destino: "CONJUNTO / APROVAÇÃO",
     escala: `1:${s}`,
-    material: nomeMaterial(d.material),
+    material: nomeMateriais(d),
     codigoMaterial: d.mdf ? nomeMdf(d.mdf) : "",
     acabamento: d.descritivo?.acabamento_ref ?? d.acabamento ?? "",
     desenhou: ctx.desenhou,
