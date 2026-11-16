@@ -37,6 +37,7 @@ import {
   type Catalogo,
   type DadosOrcamento,
   type EspecMaterial,
+  type FaceDentro,
   type Movel,
   type Parametros,
   type Tampo,
@@ -766,7 +767,7 @@ function CartaoMovel({
               </div>
               <div className="grid gap-4 lg:grid-cols-2">
                 <EditorEspec titulo="Corpo" e={m.corpo} decors={decors} pode={pode} on={(e) => mudarEspec("corpo", e)} />
-                <EditorEspec titulo="Frentes (portas, gavetas, rodapé)" e={m.frente} decors={decors} pode={pode} on={(e) => mudarEspec("frente", e)} />
+                <EditorEspec titulo="Frentes (portas, gavetas, rodapé)" frente e={m.frente} decors={decors} pode={pode} on={(e) => mudarEspec("frente", e)} />
               </div>
               <div>
                 <p className="mb-2 text-sm font-semibold">Checklist para o desenho</p>
@@ -829,28 +830,63 @@ function Pergunta<T extends string>({ l, v, op, on, pode, ajuda }: { l: string; 
   );
 }
 
-function EditorEspec({ titulo, e, decors, pode, on }: { titulo: string; e: EspecMaterial; decors: Decor[]; pode: boolean; on: (e: EspecMaterial) => void }) {
-  const extraRotulo = e.material === "folheado" ? "Folha de madeira (€/m² por face)" : e.material === "lacado" ? "Lacagem (€/m² por face)" : e.material === "madeira" ? "Madeira maciça (€/m²)" : "";
+const MATERIAIS_FACE: { id: FaceDentro["material"]; nome: string }[] = [
+  { id: "laminado", nome: "Laminado" },
+  { id: "folheado", nome: "Folheado" },
+  { id: "lacado", nome: "Lacado" },
+];
+
+/** Campo do acabamento de uma face: decor (laminado, da lista) ou texto (cor / folha). */
+function CampoAcabamento({ material, valor, decors, pode, on }: { material: string; valor: string; decors: Decor[]; pode: boolean; on: (v: string) => void }) {
+  if (material === "laminado")
+    return (
+      <div className="sm:col-span-2">
+        <label className="rotulo">Decor (referência)</label>
+        <SeletorDecor decors={decors} valor={valor} pode={pode} onChange={on} />
+      </div>
+    );
+  return (
+    <div>
+      <label className="rotulo">{material === "lacado" ? "Cor (RAL / ref.)" : "Folha / madeira"}</label>
+      <input className="campo" disabled={!pode} value={valor} onChange={(x) => on(x.target.value)} />
+    </div>
+  );
+}
+
+function EditorEspec({ titulo, e, decors, pode, on, frente }: { titulo: string; e: EspecMaterial; decors: Decor[]; pode: boolean; on: (e: EspecMaterial) => void; frente?: boolean }) {
+  const dif = !!frente && e.faces === "diferentes";
+  const de: FaceDentro = e.dentro ?? { material: "laminado", acabamento: "", extra_m2: null };
+  // faces diferentes com algum acabamento que não seja laminado: placa de MDF e custo por face
+  const mista = dif && !(e.material === "laminado" && de.material === "laminado");
+  const rotuloFace = (mat: string) => (mat === "folheado" ? "Folha de madeira (€/m²)" : mat === "lacado" ? "Lacagem (€/m²)" : "Laminado aplicado (€/m²)");
+  const extraRotulo = dif
+    ? mista ? rotuloFace(e.material) : ""
+    : e.material === "folheado" ? "Folha de madeira (€/m² por face)" : e.material === "lacado" ? "Lacagem (€/m² por face)" : e.material === "madeira" ? "Madeira maciça (€/m²)" : "";
   const perguntaOrla = e.material === "madeira" || e.material === "folheado";
+  const precisaMdf = dif ? mista : e.material === "folheado" || e.material === "lacado";
+  const materiais = dif ? MATERIAIS.filter((m) => m.id !== "madeira") : MATERIAIS;
   return (
     <fieldset className="rounded-md border border-slate-200 p-3">
       <legend className="px-1 text-sm font-semibold">{titulo}</legend>
+      {frente && (
+        <div className="mb-3">
+          <Pergunta
+            l="Acabamento das faces (dentro / fora)"
+            v={e.faces}
+            op={[{ id: "iguais", nome: "Igual nas duas faces" }, { id: "diferentes", nome: "Diferente em cada face" }]}
+            pode={pode}
+            on={(v) => on({ ...e, faces: v, ...(v === "diferentes" ? { dentro: e.dentro ?? { material: e.material === "madeira" ? "laminado" : e.material, acabamento: "", extra_m2: null }, material: e.material === "madeira" ? "laminado" : e.material } : {}) })}
+            ajuda={e.faces ? undefined : "Por responder: escolha se portas e gavetas têm o mesmo acabamento por dentro e por fora."}
+          />
+        </div>
+      )}
+      {dif && <p className="mb-1 text-xs font-semibold uppercase text-slate-500">Face de fora</p>}
       <div className="grid gap-3 sm:grid-cols-2">
-        <Sel l="Material" v={e.material} op={MATERIAIS.map((m) => m.id)} rot={Object.fromEntries(MATERIAIS.map((m) => [m.id, m.nome]))} on={(v) => on({ ...e, material: v as EspecMaterial["material"] })} pode={pode} semVazio />
-        {(e.material === "folheado" || e.material === "lacado") && (
+        <Sel l="Material" v={e.material} op={materiais.map((m) => m.id)} rot={Object.fromEntries(materiais.map((m) => [m.id, m.nome]))} on={(v) => on({ ...e, material: v as EspecMaterial["material"] })} pode={pode} semVazio />
+        {precisaMdf && (
           <Sel l="MDF" v={e.mdf} op={MDFS.map((m) => m.id)} rot={Object.fromEntries(MDFS.map((m) => [m.id, m.nome]))} on={(v) => on({ ...e, mdf: v as EspecMaterial["mdf"] })} pode={pode} />
         )}
-        {e.material === "laminado" ? (
-          <div className="sm:col-span-2">
-            <label className="rotulo">Decor (referência)</label>
-            <SeletorDecor decors={decors} valor={e.acabamento} pode={pode} onChange={(ref) => on({ ...e, acabamento: ref, grupo: "" })} />
-          </div>
-        ) : (
-          <div>
-            <label className="rotulo">{e.material === "lacado" ? "Cor (RAL / ref.)" : "Folha / madeira"}</label>
-            <input className="campo" disabled={!pode} value={e.acabamento} onChange={(x) => on({ ...e, acabamento: x.target.value })} />
-          </div>
-        )}
+        <CampoAcabamento material={e.material} valor={e.acabamento} decors={decors} pode={pode} on={(v) => on({ ...e, acabamento: v, grupo: "" })} />
         {extraRotulo && (
           <div>
             <label className="rotulo">{extraRotulo}</label>
@@ -858,6 +894,24 @@ function EditorEspec({ titulo, e, decors, pode, on }: { titulo: string; e: Espec
           </div>
         )}
       </div>
+      {dif && (
+        <>
+          <p className="mb-1 mt-4 text-xs font-semibold uppercase text-slate-500">Face de dentro</p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Sel l="Material" v={de.material} op={MATERIAIS_FACE.map((m) => m.id)} rot={Object.fromEntries(MATERIAIS_FACE.map((m) => [m.id, m.nome]))} on={(v) => on({ ...e, dentro: { ...de, material: v as FaceDentro["material"] } })} pode={pode} semVazio />
+            <CampoAcabamento material={de.material} valor={de.acabamento} decors={decors} pode={pode} on={(v) => on({ ...e, dentro: { ...de, acabamento: v } })} />
+            {mista && (
+              <div>
+                <label className="rotulo">{rotuloFace(de.material)}</label>
+                <CampoNumero className="campo" disabled={!pode} valor={de.extra_m2} onValor={(v) => on({ ...e, dentro: { ...de, extra_m2: v } })} />
+              </div>
+            )}
+          </div>
+          <p className="mt-2 text-xs text-slate-500">
+            {mista ? "Placa de MDF com acabamento próprio em cada face (custo por m² de cada face)." : "Placa laminada bi-decor: conta o preço mais alto das duas referências."}
+          </p>
+        </>
+      )}
       <div className="mt-2 text-sm">
         {e.material === "laminado" && <p className="text-xs text-slate-500">Orla em todo o perímetro das peças.</p>}
         {e.material === "lacado" && <p className="text-xs text-slate-500">Lacado: as peças não levam orla.</p>}
@@ -923,7 +977,14 @@ function TabelaPecas({ m, pode, onAlterar }: { m: Movel; pode: boolean; onAltera
                   />
                 </td>
                 <td>{celula(pode, p.preco_m2, (v) => setP(p.id, "preco_m2", numOuNull(v)), "number", "w-20", p.preco_m2 == null)}</td>
-                <td>{p.faces_extra > 0 ? celula(pode, p.preco_extra_m2, (v) => setP(p.id, "preco_extra_m2", numOuNull(v)), "number", "w-20", p.preco_extra_m2 == null) : <span className="text-slate-300">—</span>}</td>
+                <td>
+                  {p.faces_extra > 0 ? celula(pode, p.preco_extra_m2, (v) => setP(p.id, "preco_extra_m2", numOuNull(v)), "number", "w-20", p.preco_extra_m2 == null) : !p.face_dentro && <span className="text-slate-300">—</span>}
+                  {p.face_dentro && (
+                    <span className="mt-0.5 flex items-center gap-1 text-[11px] text-slate-500">
+                      {p.faces_extra > 0 && "fora · "}dentro {celula(pode, p.preco_dentro_m2 ?? null, (v) => setP(p.id, "preco_dentro_m2", numOuNull(v)), "number", "w-16", p.preco_dentro_m2 == null)}
+                    </span>
+                  )}
+                </td>
                 <td>{celula(pode, p.preco_orla_ml, (v) => setP(p.id, "preco_orla_ml", numOuNull(v)), "number", "w-16")}</td>
                 <td className="text-right tabular-nums">{euro(c.material + c.orla)}</td>
                 <td>{pode && <button className="text-xs text-rose-700" aria-label="Remover peça" onClick={() => onAlterar((x) => ({ ...x, pecas: x.pecas.filter((q) => q.id !== p.id) }))}>✕</button>}</td>

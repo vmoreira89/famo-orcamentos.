@@ -33,7 +33,37 @@ export type EspecMaterial = {
   grupo: string; // grupo de laminado (código), quando laminado
   extra_m2: number | null; // folheado: folha €/m²; lacado: lacagem €/m²; madeira: €/m² (manual)
   orlar?: boolean; // madeira/folheado: se leva orla (por defeito não); laminado leva sempre; lacado nunca
+  // frentes (portas e gavetas): acabamento igual nas duas faces ou diferente; se diferente, os campos acima são a face de fora
+  faces?: "iguais" | "diferentes";
+  dentro?: FaceDentro;
 };
+
+/** Acabamento da face de dentro das portas/gavetas, quando é diferente da de fora. */
+export type FaceDentro = { material: Exclude<Material, "madeira">; acabamento: string; extra_m2: number | null };
+
+/** Descrição curta de uma face (para notas e desenhos). */
+const descFace = (material: Material, acabamento: string) => `${material}${acabamento ? ` ${acabamento}` : ""}`;
+
+/**
+ * Preço das frentes. Faces iguais: como sempre (placa + folha/laca nas 2 faces).
+ * Faces diferentes: só laminados → placa bi-decor (fica o preço mais alto das duas referências);
+ * caso contrário placa de MDF + custo de cada face ao €/m² indicado (folha, laca ou laminado aplicado).
+ */
+export function precoFrente(cat: Catalogo, esp: EspecMaterial, e: number, escalao: Escalao = "placa") {
+  if (esp.faces !== "diferentes" || !esp.dentro) {
+    const p = precoPlaca(cat, esp, e, escalao);
+    return { m2: p.m2, extra: p.extra, faces: esp.material === "folheado" || esp.material === "lacado" ? 2 : 0, dentro: null as number | null, faceDentro: false, nota: p.nota };
+  }
+  const de = esp.dentro;
+  const nota = `Fora: ${descFace(esp.material, esp.acabamento)} · Dentro: ${descFace(de.material, de.acabamento)}`;
+  if (esp.material === "laminado" && de.material === "laminado") {
+    const a = precoPlaca(cat, esp, e, escalao).m2, b = precoPlaca(cat, { ...esp, acabamento: de.acabamento }, e, escalao).m2;
+    return { m2: a == null || b == null ? null : Math.max(a, b), extra: null, faces: 0, dentro: null, faceDentro: false, nota: `Placa bi-decor. ${nota}` };
+  }
+  const mdf = precoPlaca(cat, { material: "lacado", mdf: esp.mdf || "normal", acabamento: "", grupo: "", extra_m2: null }, e).m2;
+  // cada face: folha / laca / laminado aplicado, ao €/m² indicado (vazio = a preencher)
+  return { m2: mdf, extra: esp.extra_m2, faces: 1, dentro: de.extra_m2, faceDentro: true, nota: `MDF ${esp.mdf || "normal"}. ${nota}` };
+}
 
 /** Laminado: orla em todo o perímetro. Lacado: sem orla. Madeira/folheado: só se pedido. */
 export function levaOrla(esp: EspecMaterial) {
@@ -75,6 +105,8 @@ export type Peca = {
   preco_m2: number | null; // placa/MDF
   preco_extra_m2: number | null; // folha ou lacagem (por face)
   faces_extra: number; // 0, 1 ou 2 faces com folha/laca
+  face_dentro?: boolean; // faces diferentes: a face de dentro tem custo próprio
+  preco_dentro_m2?: number | null; // €/m² da face de dentro (folha, laca ou laminado aplicado)
   preco_orla_ml: number | null;
   nota: string; // ex.: folha de madeira a usar
   codigo?: string;
@@ -457,12 +489,13 @@ export function decompor(m: Movel, cat: Catalogo, escalao: Escalao = "placa"): M
   const interior = L - 2 * e;
   const sobre = !!m.topo_sobre_ilhargas; // tampo/travessas por cima das ilhargas
   const pc = precoPlaca(cat, m.corpo, e, escalao);
-  const pf = precoPlaca(cat, m.frente, e, escalao);
+  const fr = precoFrente(cat, m.frente, e, escalao);
+  const pf = { m2: fr.m2, extra: fr.extra, nota: fr.nota };
   const pcosta = precoPlaca(cat, { ...m.corpo }, m.costa_e, escalao);
   const orlaC = precoOrla(cat, m.corpo);
   const orlaF = precoOrla(cat, m.frente);
   const facesC = m.corpo.material === "folheado" || m.corpo.material === "lacado" ? 2 : 0;
-  const facesF = m.frente.material === "folheado" || m.frente.material === "lacado" ? 2 : 0;
+  const facesF = fr.faces;
 
   const peca = (p: Partial<Peca> & Pick<Peca, "designacao" | "c" | "l">): Peca => {
     const sup = p.sup ?? "corpo";
@@ -477,6 +510,7 @@ export function decompor(m: Movel, cat: Catalogo, escalao: Escalao = "placa"): M
       preco_m2: base.m2,
       preco_extra_m2: sup === "costa" ? null : base.extra,
       faces_extra: sup === "frente" ? facesF : sup === "costa" ? 0 : facesC,
+      ...(sup === "frente" && fr.faceDentro ? { face_dentro: true, preco_dentro_m2: fr.dentro } : {}),
       preco_orla_ml: sup === "frente" ? orlaF : orlaC,
       nota: base.nota,
       ...p,
@@ -621,6 +655,10 @@ export function actualizarPrecos(m: Movel, cat: Catalogo, escalao: Escalao = "pl
   const pecas = m.pecas.map((p) => {
     if (p.sup === "manual") return p;
     const esp = p.sup === "frente" ? m.frente : m.corpo;
+    if (p.sup === "frente") {
+      const f = precoFrente(cat, esp, p.e, escalao);
+      return { ...p, preco_m2: f.m2, preco_extra_m2: f.faces > 0 ? f.extra : null, faces_extra: f.faces, face_dentro: f.faceDentro, preco_dentro_m2: f.dentro, preco_orla_ml: precoOrla(cat, esp), nota: f.nota || p.nota };
+    }
     const pr = precoPlaca(cat, esp, p.e, escalao);
     return { ...p, preco_m2: pr.m2, preco_extra_m2: p.faces_extra > 0 ? pr.extra : p.preco_extra_m2, preco_orla_ml: precoOrla(cat, esp), nota: pr.nota || p.nota };
   });
@@ -638,6 +676,13 @@ export function aplicarEscalao(m: Movel, cat: Catalogo, escalao: Escalao): Movel
       if (p.sup === "manual") {
         if (m.tipo === "tampo" && m.corpo.material === "laminado") esp = m.corpo;
         else if (p.designacao === "Rodapé" && m.rodape_tipo === "laminado") esp = m.frente.material === "laminado" ? m.frente : m.corpo;
+      } else if (p.sup === "frente" && m.frente.faces === "diferentes" && m.frente.dentro) {
+        // bi-decor laminado: preço pela regra das frentes
+        if (m.frente.material === "laminado" && m.frente.dentro.material === "laminado") {
+          const v = precoFrente(cat, m.frente, p.e, escalao).m2;
+          return v == null ? p : { ...p, preco_m2: v };
+        }
+        return p;
       } else {
         const e = p.sup === "frente" ? m.frente : m.corpo;
         if (e.material === "laminado") esp = e;
@@ -708,7 +753,9 @@ export function custoPeca(p: Peca) {
   const ar = arestasOrla(p);
   const orlaMl = (p.qtd * ((Number(ar[0]) + Number(ar[1])) * p.c + (Number(ar[2]) + Number(ar[3])) * p.l)) / 1000;
   const placa = p.preco_m2 == null ? null : area * p.preco_m2;
-  const extra = p.faces_extra > 0 ? (p.preco_extra_m2 == null ? null : area * p.faces_extra * p.preco_extra_m2) : 0;
+  const fora = p.faces_extra > 0 ? (p.preco_extra_m2 == null ? null : area * p.faces_extra * p.preco_extra_m2) : 0;
+  const dentro = p.face_dentro ? (p.preco_dentro_m2 == null ? null : area * p.preco_dentro_m2) : 0;
+  const extra = fora == null || dentro == null ? null : fora + dentro;
   const orla = orlaMl > 0 ? (p.preco_orla_ml == null ? null : orlaMl * p.preco_orla_ml) : 0;
   const pendente = placa == null || extra == null || orla == null;
   return { area, orlaMl, material: (placa ?? 0) + (extra ?? 0), orla: orla ?? 0, pendente };
