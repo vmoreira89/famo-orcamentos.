@@ -122,8 +122,41 @@ export type Movel = {
   extras: LinhaExtra[];
   notas: string;
   espaco_antes?: number; // mm livres antes deste móvel (janela, electrodoméstico, parede…)
+  frentes?: TipoFrentes; // resposta à pergunta «portas / gavetas / portas e gavetas»
+  topo_sobre_ilhargas?: boolean; // tampo/travessas por cima das ilhargas (por defeito: por dentro)
+  rodape_tipo?: TipoRodape; // cozinhas
   codigo?: string;
 };
+
+export type TipoFrentes = "portas" | "gavetas" | "portas_gavetas" | "aberto";
+export const FRENTES: { id: TipoFrentes; nome: string }[] = [
+  { id: "portas", nome: "Portas" },
+  { id: "gavetas", nome: "Gavetas" },
+  { id: "portas_gavetas", nome: "Portas e gavetas" },
+  { id: "aberto", nome: "Aberto (sem frentes)" },
+];
+/** Ajusta nº de portas e gavetas à resposta dada. */
+export function aplicarFrentes(m: Movel, f: TipoFrentes): Movel {
+  const portas = f === "portas" || f === "portas_gavetas" ? m.portas || (m.L > 600 ? 2 : 1) : 0;
+  const gavetas = f === "gavetas" ? m.gavetas || 3 : f === "portas_gavetas" ? m.gavetas || 1 : 0;
+  return { ...m, frentes: f, portas, gavetas };
+}
+
+export type TipoRodape = "mdf" | "laminado" | "inox" | "inox_pintar";
+export const RODAPES: { id: TipoRodape; nome: string }[] = [
+  { id: "mdf", nome: "MDF" },
+  { id: "laminado", nome: "Laminado" },
+  { id: "inox", nome: "Inox" },
+  { id: "inox_pintar", nome: "Inox (p/ pintar)" },
+];
+
+/** Preço dos laminados a aplicar no orçamento: à placa (por defeito), à palete ou ao camião. */
+export type Escalao = "placa" | "palete" | "camiao";
+export const ESCALOES: { id: Escalao; nome: string }[] = [
+  { id: "placa", nome: "Preço m² à placa" },
+  { id: "palete", nome: "Preço m² à palete" },
+  { id: "camiao", nome: "Preço m² ao camião" },
+];
 
 /** Tampo de bancada de uma divisão: produto 10* com uma peça 03.4* por troço. */
 export type Tampo = {
@@ -144,9 +177,9 @@ export type Tampo = {
   codigo?: string;
 };
 
-export type DadosOrcamento = { moveis: Movel[]; extras_gerais: LinhaExtra[]; tampos?: Record<string, Tampo> };
+export type DadosOrcamento = { moveis: Movel[]; extras_gerais: LinhaExtra[]; tampos?: Record<string, Tampo>; escalao_laminado?: Escalao };
 
-export function tampoPorDefeito(d: Divisao, moveis: Movel[], cat?: Catalogo): Tampo {
+export function tampoPorDefeito(d: Divisao, moveis: Movel[], cat?: Catalogo, escalao: Escalao = "placa"): Tampo {
   const txt = (d.descritivo?.tampo ?? "").toLowerCase();
   const esp = parseInt(txt.match(/(\d{2})\s*mm/)?.[1] ?? "", 10);
   const material: Tampo["material"] = txt.includes("compacto") ? "compacto" : txt.includes("pedra") || txt.includes("granito") || txt.includes("quartz") || txt.includes("silestone") ? "pedra" : txt.includes("madeira") ? "madeira" : "laminado";
@@ -168,14 +201,14 @@ export function tampoPorDefeito(d: Divisao, moveis: Movel[], cat?: Catalogo): Ta
     preco_orla_ml: null,
     notas: d.descritivo?.tampo ?? "",
   };
-  return cat ? precosTampo(t, cat) : t;
+  return cat ? precosTampo(t, cat, escalao) : t;
 }
 
 /** Lê da base de dados o preço do tampo (grupo/decor por espessura) e da orla. */
-export function precosTampo(t: Tampo, cat: Catalogo): Tampo {
+export function precosTampo(t: Tampo, cat: Catalogo, escalao: Escalao = "placa"): Tampo {
   if (t.material !== "laminado") return { ...t, preco_orla_ml: t.preco_orla_ml ?? cat.parametros.orla_preco_ml };
   const esp: EspecMaterial = { material: "laminado", mdf: "", acabamento: t.acabamento, grupo: t.grupo ?? "", extra_m2: null };
-  return { ...t, preco_m2: precoPlaca(cat, esp, t.espessura).m2, preco_orla_ml: precoOrla(cat, esp) };
+  return { ...t, preco_m2: precoPlaca(cat, esp, t.espessura, escalao).m2, preco_orla_ml: precoOrla(cat, esp) };
 }
 
 /** Troços contínuos de móveis de baixo (as colunas e os espaços interrompem o tampo). */
@@ -258,7 +291,7 @@ export type Parametros = { custo_minuto: number; desperdicio_pct: number; orla_p
 /** Dados da base de dados necessários para preços. */
 export type Catalogo = {
   parametros: Parametros;
-  gruposPreco: { grupo: string; acabamento: string | null; tipo: string; espessura: number; medida: string | null; preco: number | null }[];
+  gruposPreco: { grupo: string; acabamento: string | null; tipo: string; espessura: number; medida: string | null; preco: number | null; palete?: number | null; camiao?: number | null }[];
   acabamentoGrupo: Record<string, string>; // referência (sem espaços, maiúsculas) -> código do grupo
   mdf: { categoria: string; espessura: number; preco: number | null; desconto: number | null }[];
   ferragens: Record<string, { descricao: string; preco: number | null; unidade: string }>; // por ref_famo
@@ -283,13 +316,17 @@ export const PREFIXO_PRODUTO: Record<TipoDivisao, string> = {
 
 /* ------------------------------------------------------------------ preços */
 
-export function precoPlaca(cat: Catalogo, esp: EspecMaterial, e: number): { m2: number | null; extra: number | null; nota: string } {
+export function precoPlaca(cat: Catalogo, esp: EspecMaterial, e: number, escalao: Escalao = "placa"): { m2: number | null; extra: number | null; nota: string } {
   if (esp.material === "laminado") {
+    // preço pela referência do decor; os decores com tabela própria por grupo (dados existentes) usam essa tabela
     const ref = norm(esp.acabamento || "");
-    const grupo = esp.grupo || cat.acabamentoGrupo[ref] || "";
+    const grupo = cat.acabamentoGrupo[ref] || esp.grupo || "";
     const especifico = cat.gruposPreco.find((p) => p.tipo === "placa" && p.acabamento && norm(p.acabamento) === ref && p.espessura === e);
     const doGrupo = cat.gruposPreco.find((p) => p.tipo === "placa" && !p.acabamento && p.grupo === grupo && p.espessura === e);
-    return { m2: especifico?.preco ?? doGrupo?.preco ?? null, extra: null, nota: "" };
+    const linha = especifico ?? doGrupo;
+    // palete/camião sem preço na tabela: fica o preço à placa
+    const v = escalao === "palete" ? linha?.palete ?? linha?.preco : escalao === "camiao" ? linha?.camiao ?? linha?.preco : linha?.preco;
+    return { m2: v ?? null, extra: null, nota: "" };
   }
   // MDF (folheado / lacado) ou madeira maciça
   if (esp.material === "madeira") return { m2: esp.extra_m2, extra: null, nota: esp.acabamento ? `Madeira: ${esp.acabamento}` : "" };
@@ -306,7 +343,7 @@ export function precoPlaca(cat: Catalogo, esp: EspecMaterial, e: number): { m2: 
 export function precoOrla(cat: Catalogo, esp: EspecMaterial): number | null {
   if (esp.material !== "laminado") return cat.parametros.orla_preco_ml;
   const ref = norm(esp.acabamento || "");
-  const grupo = esp.grupo || cat.acabamentoGrupo[ref] || "";
+  const grupo = cat.acabamentoGrupo[ref] || esp.grupo || "";
   const especifica = cat.gruposPreco.find((p) => p.tipo === "orla" && p.acabamento && norm(p.acabamento) === ref && p.medida === "23x2");
   const doGrupo = cat.gruposPreco.find((p) => p.tipo === "orla" && !p.acabamento && p.grupo === grupo && p.medida === "23x2");
   return especifica?.preco ?? doGrupo?.preco ?? cat.parametros.orla_preco_ml;
@@ -413,13 +450,14 @@ export function proporMoveis(divisao: Divisao): Movel[] {
 
 /* ------------------------------------------------------------------ decompor um móvel */
 
-export function decompor(m: Movel, cat: Catalogo): Movel {
+export function decompor(m: Movel, cat: Catalogo, escalao: Escalao = "placa"): Movel {
   const e = 19;
   const L = m.L, A = m.A, P = m.P;
   const interior = L - 2 * e;
-  const pc = precoPlaca(cat, m.corpo, e);
-  const pf = precoPlaca(cat, m.frente, e);
-  const pcosta = precoPlaca(cat, { ...m.corpo }, m.costa_e);
+  const sobre = !!m.topo_sobre_ilhargas; // tampo/travessas por cima das ilhargas
+  const pc = precoPlaca(cat, m.corpo, e, escalao);
+  const pf = precoPlaca(cat, m.frente, e, escalao);
+  const pcosta = precoPlaca(cat, { ...m.corpo }, m.costa_e, escalao);
   const orlaC = precoOrla(cat, m.corpo);
   const orlaF = precoOrla(cat, m.frente);
   const facesC = m.corpo.material === "folheado" || m.corpo.material === "lacado" ? 2 : 0;
@@ -446,13 +484,14 @@ export function decompor(m: Movel, cat: Catalogo): Movel {
 
   const pecas: Peca[] = [];
   const ehAberto = m.tipo === "estante";
-  pecas.push(peca({ designacao: "Lado esquerdo", c: A, l: P }));
-  pecas.push(peca({ designacao: "Lado direito", c: A, l: P }));
+  // por defeito o tampo (cúpula) e as travessas ficam por dentro das ilhargas; por cima, as ilhargas encurtam 19 mm
+  pecas.push(peca({ designacao: "Lado esquerdo", c: sobre ? A - e : A, l: P }));
+  pecas.push(peca({ designacao: "Lado direito", c: sobre ? A - e : A, l: P }));
   pecas.push(peca({ designacao: "Fundo", c: interior, l: P }));
   if (m.tipo === "inferior" || m.tipo === "gaveteiro") {
-    pecas.push(peca({ designacao: "Travessa superior", qtd: 2, c: interior, l: 100 }));
+    pecas.push(peca({ designacao: "Travessa superior", qtd: 2, c: sobre ? L : interior, l: 100, nota: sobre ? "Por cima das ilhargas" : "" }));
   } else {
-    pecas.push(peca({ designacao: "Cúpula", c: interior, l: P }));
+    pecas.push(peca({ designacao: "Cúpula", c: sobre ? L : interior, l: P, nota: sobre ? "Por cima das ilhargas" : "" }));
   }
   if (!ehAberto || m.costa_e > 0) {
     pecas.push(peca({ designacao: "Costa", c: interior + 16, l: A - 2 * e + 16, e: m.costa_e, sup: "costa" }));
@@ -487,8 +526,19 @@ export function decompor(m: Movel, cat: Catalogo): Movel {
     const larg = Math.floor(L / m.portas) + 30;
     pecas.push(peca({ designacao: "Porta de correr", qtd: m.portas, c: A - 40, l: larg, sup: "frente" }));
   }
-  if (TIPOS_MOVEL[m.tipo].pes) {
-    pecas.push(peca({ designacao: "Rodapé", c: L, l: 100, sup: "frente" }));
+  // rodapé: MDF (sem orla), laminado (como as peças laminadas) ou inox (perfil ao metro, vai para as ferragens)
+  const rod = m.rodape_tipo;
+  if (TIPOS_MOVEL[m.tipo].pes && rod !== "inox" && rod !== "inox_pintar") {
+    if (rod === "mdf") {
+      const pm = precoPlaca(cat, { material: "lacado", mdf: m.frente.mdf || "hidrofugo", acabamento: "", grupo: "", extra_m2: null }, e);
+      pecas.push(peca({ designacao: "Rodapé", c: L, l: 100, sup: "manual", preco_m2: pm.m2, preco_extra_m2: null, faces_extra: 0, preco_orla_ml: null, orlas: [false, false, false, false], oc: 0, ol: 0, nota: `Rodapé MDF ${m.frente.mdf || "hidrófugo"}` }));
+    } else if (rod === "laminado") {
+      const lam = m.frente.material === "laminado" ? m.frente : m.corpo.material === "laminado" ? m.corpo : { ...m.frente, material: "laminado" as const, acabamento: "" };
+      const pl = precoPlaca(cat, lam, e, escalao);
+      pecas.push(peca({ designacao: "Rodapé", c: L, l: 100, sup: "manual", preco_m2: pl.m2, preco_extra_m2: null, faces_extra: 0, preco_orla_ml: precoOrla(cat, lam), orlas: [true, true, true, true], oc: 2, ol: 2, nota: `Rodapé laminado ${lam.acabamento}`.trim() }));
+    } else {
+      pecas.push(peca({ designacao: "Rodapé", c: L, l: 100, sup: "frente" }));
+    }
   }
 
   // Ferragens
@@ -517,6 +567,9 @@ export function decompor(m: Movel, cat: Catalogo): Movel {
   fs.push(ferr(cat, null, 4, "Minifix completo (genérico de orçamento)"));
   fs.push(ferr(cat, "03.1.912.01", 8));
   fs.push(ferr(cat, "04.2.020", 4));
+  if (TIPOS_MOVEL[m.tipo].pes && (rod === "inox" || rod === "inox_pintar")) {
+    fs.push({ ...ferr(cat, null, Math.round(L) / 1000, rod === "inox" ? "Rodapé inox" : "Rodapé inox (para pintar)"), unidade: "ml" });
+  }
   if (TIPOS_MOVEL[m.tipo].pes) {
     fs.push(ferr(cat, "03.6.432.01", 4));
     fs.push(ferr(cat, "03.6.433.01", 4));
@@ -549,16 +602,36 @@ export function decompor(m: Movel, cat: Catalogo): Movel {
 }
 
 /** Volta a ler os preços da base de dados para as linhas existentes (mantém quantidades e medidas). */
-export function actualizarPrecos(m: Movel, cat: Catalogo): Movel {
+export function actualizarPrecos(m: Movel, cat: Catalogo, escalao: Escalao = "placa"): Movel {
   const pecas = m.pecas.map((p) => {
     if (p.sup === "manual") return p;
     const esp = p.sup === "frente" ? m.frente : m.corpo;
-    const pr = precoPlaca(cat, esp, p.e);
+    const pr = precoPlaca(cat, esp, p.e, escalao);
     return { ...p, preco_m2: pr.m2, preco_extra_m2: p.faces_extra > 0 ? pr.extra : p.preco_extra_m2, preco_orla_ml: precoOrla(cat, esp), nota: pr.nota || p.nota };
   });
   const ferragens = m.ferragens.map((f) => (f.ref_famo && cat.ferragens[f.ref_famo] ? { ...f, preco: cat.ferragens[f.ref_famo].preco } : f));
   const operacoes = m.operacoes.map((o) => ({ ...o, custo_minuto: cat.postos[o.posto]?.custo_minuto ?? cat.parametros.custo_minuto }));
   return { ...m, pecas, ferragens, operacoes };
+}
+
+/** Muda só o preço por m² das placas laminadas para o escalão escolhido (placa/palete/camião). */
+export function aplicarEscalao(m: Movel, cat: Catalogo, escalao: Escalao): Movel {
+  return {
+    ...m,
+    pecas: m.pecas.map((p) => {
+      let esp: EspecMaterial | null = null;
+      if (p.sup === "manual") {
+        if (m.tipo === "tampo" && m.corpo.material === "laminado") esp = m.corpo;
+        else if (p.designacao === "Rodapé" && m.rodape_tipo === "laminado") esp = m.frente.material === "laminado" ? m.frente : m.corpo;
+      } else {
+        const e = p.sup === "frente" ? m.frente : m.corpo;
+        if (e.material === "laminado") esp = e;
+      }
+      if (!esp || esp.material !== "laminado") return p;
+      const v = precoPlaca(cat, esp, p.e, escalao).m2;
+      return v == null ? p : { ...p, preco_m2: v };
+    }),
+  };
 }
 
 /* ------------------------------------------------------------------ códigos */

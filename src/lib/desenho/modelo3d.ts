@@ -84,14 +84,17 @@ export function modelo3d(m: Movel): Painel[] {
   // costa aplicada (por trás, a toda a medida) ou encastrada (entre lados, fundo e cúpula)
   const aplicada = ec > 0 && (m.checklist.costa ?? "").toLowerCase().startsWith("aplicada");
   const Pc = aplicada ? P - ec : P; // profundidade dos painéis do corpo
-  ps.push({ nome: "Lado esquerdo", tipo: "corpo", x: 0, y: y0, z: 0, w: E, h: A, d: Pc, ref: ref("Lado esquerdo") });
-  ps.push({ nome: "Lado direito", tipo: "corpo", x: L - E, y: y0, z: 0, w: E, h: A, d: Pc, ref: ref("Lado direito") });
+  // tampo/travessas por dentro das ilhargas (padrão) ou por cima (ilhargas mais curtas 19 mm)
+  const sobre = !!m.topo_sobre_ilhargas;
+  const hL = sobre ? A - E : A, xt = sobre ? 0 : E, wt = sobre ? L : L - 2 * E;
+  ps.push({ nome: "Lado esquerdo", tipo: "corpo", x: 0, y: y0, z: 0, w: E, h: hL, d: Pc, ref: ref("Lado esquerdo") });
+  ps.push({ nome: "Lado direito", tipo: "corpo", x: L - E, y: y0, z: 0, w: E, h: hL, d: Pc, ref: ref("Lado direito") });
   ps.push({ nome: "Fundo", tipo: "corpo", x: E, y: y0, z: 0, w: L - 2 * E, h: E, d: Pc, ref: ref("Fundo") });
   if (m.tipo === "inferior" || m.tipo === "gaveteiro") {
-    ps.push({ nome: "Travessa frente", tipo: "corpo", x: E, y: y0 + A - E, z: 0, w: L - 2 * E, h: E, d: 100, ref: ref("Travessa") });
-    ps.push({ nome: "Travessa trás", tipo: "corpo", x: E, y: y0 + A - E, z: Pc - (aplicada ? 0 : ec) - 100, w: L - 2 * E, h: E, d: 100, ref: ref("Travessa") });
+    ps.push({ nome: "Travessa frente", tipo: "corpo", x: xt, y: y0 + A - E, z: 0, w: wt, h: E, d: 100, ref: ref("Travessa") });
+    ps.push({ nome: "Travessa trás", tipo: "corpo", x: xt, y: y0 + A - E, z: Pc - (aplicada ? 0 : ec) - 100, w: wt, h: E, d: 100, ref: ref("Travessa") });
   } else {
-    ps.push({ nome: "Cúpula", tipo: "corpo", x: E, y: y0 + A - E, z: 0, w: L - 2 * E, h: E, d: Pc, ref: ref("Cúpula") });
+    ps.push({ nome: "Cúpula", tipo: "corpo", x: xt, y: y0 + A - E, z: 0, w: wt, h: E, d: Pc, ref: ref("Cúpula") });
   }
   if (ec > 0) {
     if (aplicada) ps.push({ nome: "Costa", tipo: "costa", x: 0, y: y0, z: P - ec, w: L, h: A, d: ec, ref: ref("Costa") });

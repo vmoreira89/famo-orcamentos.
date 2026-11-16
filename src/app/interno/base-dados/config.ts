@@ -88,8 +88,8 @@ export const TABELAS: ConfigTabela[] = [
   },
   {
     id: "precos_grupo_laminado",
-    nome: "Preços por grupo",
-    descricao: "Preço por m² das placas e por metro linear das orlas, por grupo de laminado. Os preços de um decor específico sobrepõem-se aos do grupo.",
+    nome: "Preços laminados",
+    descricao: "Preço das placas laminadas por m² à placa, à palete e ao camião (o orçamento usa à placa, salvo escolha no fim do orçamento), e das orlas por metro linear. Os preços por referência (decor) sobrepõem-se aos da tabela base.",
     ordem: [{ col: "grupo_id" }, { col: "tipo" }, { col: "espessura_mm" }],
     pesquisa: ["notas", "medida", "tipo"],
     campos: [
@@ -116,7 +116,9 @@ export const TABELAS: ConfigTabela[] = [
         lista: true,
         ajuda: "Vazio = preço do grupo. Preenchido = preço só desse decor (sobrepõe-se ao do grupo).",
       },
-      { k: "preco_m2", l: "Preço", tipo: "numero", sufixo: "€", lista: true },
+      { k: "preco_m2", l: "Preço m² placa", tipo: "numero", sufixo: "€", lista: true, ajuda: "Placas: €/m² à placa (base das contas). Orlas: €/ml." },
+      { k: "preco_m2_palete", l: "Preço m² palete", tipo: "numero", sufixo: "€", lista: true, ajuda: "Só placas. Vazio = usa o preço à placa." },
+      { k: "preco_m2_camiao", l: "Preço m² camião", tipo: "numero", sufixo: "€", lista: true, ajuda: "Só placas. Vazio = usa o preço à placa." },
       { k: "notas", l: "Notas", tipo: "texto", lista: true },
     ],
   },

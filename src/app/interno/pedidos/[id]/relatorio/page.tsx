@@ -224,7 +224,7 @@ function Relatorio() {
       <section className="mt-6 border-t-2 border-marca pt-3 text-right">
         {tipo === "detalhado" && (
           <p className="text-sm">
-            Custo total {euro(totais.custo)} · margem {m}% · custo/min {euro(orc.parametros.custo_minuto)} · desperdício {orc.parametros.desperdicio_pct}%
+            Custo total {euro(totais.custo)} · margem {m}% · custo/min {euro(orc.parametros.custo_minuto)} · desperdício {orc.parametros.desperdicio_pct}% · laminados: preço m² {orc.dados.escalao_laminado === "palete" ? "à palete" : orc.dados.escalao_laminado === "camiao" ? "ao camião" : "à placa"}
           </p>
         )}
         <p className="text-lg">Total: <strong>{euro(totais.preco)}</strong> <span className="text-sm text-slate-500">(valores sem IVA)</span></p>

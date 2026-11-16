@@ -4,12 +4,19 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
-import { carregarCatalogo, listaGrupos } from "@/lib/catalogo";
+import { carregarCatalogo } from "@/lib/catalogo";
 import { ESTADOS, MATERIAIS, MDFS, nomeDivisao, type Divisao, type Pedido, type Permissoes } from "@/lib/pedido";
 import {
   CHECKLIST,
   TIPOS_MOVEL,
   actualizarPrecos,
+  aplicarEscalao,
+  aplicarFrentes,
+  ESCALOES,
+  FRENTES,
+  RODAPES,
+  type Escalao,
+  type TipoRodape,
   calcularTotais,
   codigoProduto,
   codigos,
@@ -52,7 +59,6 @@ export default function EditorOrcamento() {
   const [divisoes, setDivisoes] = useState<Divisao[]>([]);
   const [perm, setPerm] = useState<Permissoes | null>(null);
   const [cat, setCat] = useState<Catalogo | null>(null);
-  const [grupos, setGrupos] = useState<string[]>([]);
   const [decors, setDecors] = useState<Decor[]>([]);
   const [dados, setDados] = useState<DadosOrcamento>({ moveis: [], extras_gerais: [] });
   const [par, setPar] = useState<Parametros | null>(null);
@@ -70,13 +76,12 @@ export default function EditorOrcamento() {
 
   const carregar = useCallback(async () => {
     const sb = supabase();
-    const [p, d, o, pm, c, g, ac, gl, fi] = await Promise.all([
+    const [p, d, o, pm, c, ac, gl, fi] = await Promise.all([
       sb.from("pedidos").select("*").eq("id", id).single(),
       sb.from("pedido_divisoes").select("*").eq("pedido_id", id).order("ordem"),
       sb.from("orcamentos").select("versao,dados,parametros,margem_pct").eq("pedido_id", id).maybeSingle(),
       sb.rpc("minhas_permissoes", { p_id: id }),
       carregarCatalogo(),
-      listaGrupos(),
       sb.from("acabamentos").select("referencia,descricao,grupo_id").or("tipo.ilike.lam%,tipo.ilike.termolam%,grupo_id.not.is.null").eq("ativo", true).order("referencia").limit(3000),
       sb.from("grupos_laminado").select("id,codigo"),
       sb.from("pedido_ficheiros").select("divisao_id").eq("pedido_id", id),
@@ -90,7 +95,6 @@ export default function EditorOrcamento() {
     setDivisoes((d.data as Divisao[]) ?? []);
     setPerm(pm.data as Permissoes);
     setCat(c);
-    setGrupos(g);
     const vistos = new Set<string>();
     setDecors(
       ((ac.data as { referencia: string; descricao: string; grupo_id: string | null }[]) ?? [])
@@ -99,7 +103,7 @@ export default function EditorOrcamento() {
     );
     const orc = o.data as LinhaOrc | null;
     if (orc) {
-      setDados({ moveis: orc.dados.moveis ?? [], extras_gerais: orc.dados.extras_gerais ?? [], tampos: orc.dados.tampos ?? {} });
+      setDados({ moveis: orc.dados.moveis ?? [], extras_gerais: orc.dados.extras_gerais ?? [], tampos: orc.dados.tampos ?? {}, escalao_laminado: orc.dados.escalao_laminado ?? "placa" });
       setPar(orc.parametros?.custo_minuto != null ? orc.parametros : c.parametros);
       setMargem(Number(orc.margem_pct));
       setVersao(orc.versao);
@@ -140,6 +144,7 @@ export default function EditorOrcamento() {
 
   const pode = perm.pode_editar && !!pedido.numero_projecto;
   const gestao = perm.pode_gerir;
+  const escalao: Escalao = dados.escalao_laminado ?? "placa";
 
   const alterar = (fn: (d: DadosOrcamento) => DadosOrcamento) => {
     setDados((d) => fn(d));
@@ -149,7 +154,7 @@ export default function EditorOrcamento() {
     alterar((d) => ({ ...d, moveis: d.moveis.map((m) => (m.id === mid ? fn(m) : m)) }));
 
   function propor(div: Divisao) {
-    const novos = proporMoveis(div).map((m) => decompor(m, cat!));
+    const novos = proporMoveis(div).map((m) => decompor(m, cat!, escalao));
     alterar((d) => ({ ...d, moveis: [...d.moveis, ...novos] }));
   }
   /** Acrescenta os móveis lidos dos ficheiros de apoio (já revistos pelo orçamentista). */
@@ -159,13 +164,13 @@ export default function EditorOrcamento() {
     const novos = ps.map((p) => {
       cont[p.tipo] = (cont[p.tipo] ?? 0) + 1;
       const m = novoMovel(div, p.tipo, cont[p.tipo]!);
-      return decompor({ ...m, designacao: p.designacao || m.designacao, qtd: Math.max(1, p.qtd), L: p.L, P: p.P, A: p.A, portas: p.portas, gavetas: p.gavetas, notas: p.origem.slice(0, 200) }, cat!);
+      return decompor({ ...m, designacao: p.designacao || m.designacao, qtd: Math.max(1, p.qtd), L: p.L, P: p.P, A: p.A, portas: p.portas, gavetas: p.gavetas, notas: p.origem.slice(0, 200) }, cat!, escalao);
     });
     alterar((d) => ({ ...d, moveis: [...d.moveis, ...novos] }));
   }
   function acrescentar(div: Divisao, tipo: TipoMovel) {
     const n = dados.moveis.filter((m) => m.divisao_id === div.id && m.tipo === tipo).length + 1;
-    const m = decompor(novoMovel(div, tipo, n), cat!);
+    const m = decompor(novoMovel(div, tipo, n), cat!, escalao);
     alterar((d) => ({ ...d, moveis: [...d.moveis, m] }));
     setAberto(m.id);
   }
@@ -182,11 +187,21 @@ export default function EditorOrcamento() {
       return { ...d, moveis: arr };
     });
   }
+  /** Aplica o escalão de preço dos laminados (placa / palete / camião) a todo o orçamento. */
+  function mudarEscalao(e: Escalao) {
+    if (e === escalao) return;
+    alterar((d) => ({
+      ...d,
+      escalao_laminado: e,
+      moveis: d.moveis.map((m) => aplicarEscalao(m, cat!, e)),
+      tampos: Object.fromEntries(Object.entries(d.tampos ?? {}).map(([k, t]) => [k, t.material === "laminado" ? precosTampo(t, cat!, e) : t])),
+    }));
+  }
   function actualizarTudo() {
     alterar((d) => ({
       ...d,
-      moveis: d.moveis.map((m) => actualizarPrecos(m, cat!)),
-      tampos: Object.fromEntries(Object.entries(d.tampos ?? {}).map(([k, t]) => [k, precosTampo(t, cat!)])),
+      moveis: d.moveis.map((m) => actualizarPrecos(m, cat!, escalao)),
+      tampos: Object.fromEntries(Object.entries(d.tampos ?? {}).map(([k, t]) => [k, precosTampo(t, cat!, escalao)])),
     }));
     setPar(cat!.parametros);
   }
@@ -255,6 +270,7 @@ export default function EditorOrcamento() {
           <p>Custo/minuto: {euro(par.custo_minuto)}</p>
           <p>Desperdício matéria: {par.desperdicio_pct}%</p>
           <p>Orla (não laminado): {euro(par.orla_preco_ml)}/ml</p>
+          <p>Laminados: {ESCALOES.find((x) => x.id === escalao)?.nome.replace("Preço m² ", "")}</p>
           <p className="mt-1 italic">Valores guardados neste orçamento.</p>
         </div>
       </section>
@@ -310,6 +326,7 @@ export default function EditorOrcamento() {
                 tampo={tamposComCodigo[div.id]}
                 custo={totais.porTampo[div.id]}
                 cat={cat}
+                escalao={escalao}
                 decors={decors}
                 pode={pode}
                 onChange={(t) => alterar((d) => ({ ...d, tampos: { ...(d.tampos ?? {}), [div.id]: t } }))}
@@ -324,12 +341,12 @@ export default function EditorOrcamento() {
                   aberto={aberto === m.id}
                   onAbrir={() => setAberto(aberto === m.id ? null : m.id)}
                   pode={pode}
-                  grupos={grupos}
                   decors={decors}
+                  cozinha={div.tipo === "cozinha"}
                   cat={cat}
                   custoMinuto={par.custo_minuto}
                   onAlterar={(fn) => alterarMovel(m.id, fn)}
-                  onRegenerar={() => alterarMovel(m.id, (x) => decompor(x, cat))}
+                  onRegenerar={() => alterarMovel(m.id, (x) => decompor(x, cat, escalao))}
                   onMover={(dir) => mover(m.id, dir)}
                   posicao={moveis.indexOf(m) + 1}
                   totalPos={moveis.length}
@@ -363,6 +380,29 @@ export default function EditorOrcamento() {
       </section>
 
 
+      {/* Pergunta final: que preço de laminado aplicar */}
+      <section className="cartao mt-8 p-5">
+        <h2 className="text-lg font-semibold">Preço dos laminados a aplicar</h2>
+        <p className="text-sm text-slate-600">
+          Por norma as contas usam o preço m² à placa. Escolha o preço a aplicar a este orçamento: os preços das placas laminadas (peças e tampos) são ajustados.
+          Se uma referência não tiver preço à palete ou ao camião, fica o preço à placa.
+        </p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          {ESCALOES.map((x) => (
+            <button
+              key={x.id}
+              type="button"
+              disabled={!pode}
+              aria-pressed={escalao === x.id}
+              onClick={() => mudarEscalao(x.id)}
+              className={`rounded-md border px-3 py-1.5 text-sm font-medium ${escalao === x.id ? "border-marca bg-marca text-white" : "border-slate-300 bg-white hover:border-slate-500"}`}
+            >
+              {x.nome}
+            </button>
+          ))}
+        </div>
+      </section>
+
       <DialogoMotivo
         aberto={guardar}
         titulo="Guardar orçamento"
@@ -370,7 +410,7 @@ export default function EditorOrcamento() {
         motivoPadrao={versao ? "" : "Primeira versão do orçamento"}
         onFechar={() => setGuardar(false)}
         onConfirmar={async (motivo) => {
-          const final = { moveis: moveisComCodigo, extras_gerais: dados.extras_gerais, tampos: tamposComCodigo };
+          const final = { moveis: moveisComCodigo, extras_gerais: dados.extras_gerais, tampos: tamposComCodigo, escalao_laminado: escalao };
           const { data, error } = await supabase().rpc("guardar_orcamento", {
             p_pedido: id,
             p_versao: versao,
@@ -456,10 +496,12 @@ function CartaoTampo({
   tampo,
   custo,
   cat,
+  escalao,
   decors,
   pode,
   onChange,
 }: {
+  escalao: Escalao;
   decors: Decor[];
   divisao: Divisao;
   moveis: Movel[];
@@ -479,7 +521,7 @@ function CartaoTampo({
         </span>
         {pode && (
           <span className="flex gap-2">
-            <button className="btn-primario" onClick={() => { onChange(tampoPorDefeito(divisao, moveis, cat)); setAberto(true); }}>Sim</button>
+            <button className="btn-primario" onClick={() => { onChange(tampoPorDefeito(divisao, moveis, cat, escalao)); setAberto(true); }}>Sim</button>
             <button className="btn-secundario" onClick={() => onChange({ ...tampoPorDefeito(divisao, moveis), incluir: false })}>Não</button>
           </span>
         )}
@@ -488,13 +530,13 @@ function CartaoTampo({
   // alterações que mudam o preço voltam a ler a base de dados
   const set = <K extends keyof Tampo>(k: K, v: Tampo[K]) => {
     const n = { ...tampo, [k]: v };
-    onChange(["material", "acabamento", "grupo", "espessura"].includes(k as string) ? precosTampo(n, cat) : n);
+    onChange(["material", "acabamento", "espessura"].includes(k as string) ? precosTampo(n, cat, escalao) : n);
   };
   if (!tampo.incluir)
     return (
       <div className="mt-3 flex items-center justify-between rounded-md border border-slate-200 bg-white px-4 py-2 text-sm text-slate-600">
         <span>Sem tampo de bancada neste conjunto.</span>
-        {pode && <button className="text-marca hover:underline" onClick={() => { onChange(precosTampo({ ...tampo, incluir: true }, cat)); setAberto(true); }}>Adicionar tampo</button>}
+        {pode && <button className="text-marca hover:underline" onClick={() => { onChange(precosTampo({ ...tampo, incluir: true }, cat, escalao)); setAberto(true); }}>Adicionar tampo</button>}
       </div>
     );
   const trocos = trocosTampo(moveis);
@@ -519,13 +561,10 @@ function CartaoTampo({
         <div className="border-t border-slate-200 p-4">
           <div className="grid gap-3 sm:grid-cols-4 lg:grid-cols-8">
             <Sel l="Material" v={tampo.material} op={["laminado", "compacto", "madeira", "pedra", "outro"]} rot={{ laminado: "Laminado", compacto: "Compacto", madeira: "Madeira", pedra: "Pedra / quartzo", outro: "Outro" }} on={(v) => set("material", v as Tampo["material"])} pode={pode} semVazio />
-            {tampo.material === "laminado" && (
-              <Sel l="Grupo" v={tampo.grupo ?? ""} op={Array.from(new Set(cat.gruposPreco.map((g) => g.grupo))).filter(Boolean).sort()} on={(v) => onChange(precosTampo({ ...tampo, grupo: v, acabamento: v && decors.some((x) => x.referencia === tampo.acabamento && x.grupo && x.grupo !== v) ? "" : tampo.acabamento }, cat))} pode={pode} />
-            )}
             <div className="sm:col-span-2">
               <label className="rotulo">Decor / referência</label>
               {tampo.material === "laminado" ? (
-                <SeletorDecor decors={decors} grupo={tampo.grupo ?? ""} valor={tampo.acabamento} pode={pode} onChange={(ref, grupo) => onChange(precosTampo({ ...tampo, acabamento: ref, grupo: tampo.grupo || grupo }, cat))} />
+                <SeletorDecor decors={decors} valor={tampo.acabamento} pode={pode} onChange={(ref) => onChange(precosTampo({ ...tampo, acabamento: ref, grupo: "" }, cat, escalao))} />
               ) : (
                 <input className="campo" disabled={!pode} value={tampo.acabamento} onChange={(e) => set("acabamento", e.target.value)} />
               )}
@@ -550,7 +589,7 @@ function CartaoTampo({
             <div>
               <label className="rotulo">Preço da placa (€/m²)</label>
               <CampoNumero className={`campo ${semPreco ? "border-amber-400 bg-amber-50" : ""}`} disabled={!pode || tampo.terceiros} valor={tampo.preco_m2} onValor={(v) => onChange({ ...tampo, preco_m2: v })} />
-              <p className="mt-1 text-xs text-slate-500">{tampo.material === "laminado" ? "Lido do grupo/decor na espessura indicada; pode ajustar." : "Sem tabela para este material: preencha."}</p>
+              <p className="mt-1 text-xs text-slate-500">{tampo.material === "laminado" ? "Lido da referência do decor na espessura indicada; pode ajustar." : "Sem tabela para este material: preencha."}</p>
             </div>
             <div>
               <label className="rotulo">Orla (€/ml)</label>
@@ -599,8 +638,8 @@ function CartaoMovel({
   aberto,
   onAbrir,
   pode,
-  grupos,
   decors,
+  cozinha,
   cat,
   custoMinuto,
   onAlterar,
@@ -619,8 +658,8 @@ function CartaoMovel({
   aberto: boolean;
   onAbrir: () => void;
   pode: boolean;
-  grupos: string[];
   decors: Decor[];
+  cozinha: boolean;
   cat: Catalogo;
   custoMinuto: number;
   onAlterar: (fn: (m: Movel) => Movel) => void;
@@ -679,6 +718,26 @@ function CartaoMovel({
 
           {sep === "Dados" && (
             <div className="space-y-4">
+              <div className="grid gap-3 lg:grid-cols-3">
+                <Pergunta
+                  l="Frentes do móvel"
+                  v={m.frentes}
+                  op={FRENTES}
+                  pode={pode}
+                  on={(v) => onAlterar((x) => aplicarFrentes(x, v))}
+                  ajuda={m.frentes ? undefined : `Por responder (agora: ${m.portas} porta(s), ${m.gavetas} gaveta(s))`}
+                />
+                <Pergunta
+                  l="Tampo / travessas superiores"
+                  v={m.topo_sobre_ilhargas ? "cima" : "dentro"}
+                  op={[{ id: "dentro", nome: "Por dentro das ilhargas" }, { id: "cima", nome: "Por cima das ilhargas" }]}
+                  pode={pode}
+                  on={(v) => set("topo_sobre_ilhargas", v === "cima")}
+                />
+                {cozinha && TIPOS_MOVEL[m.tipo].pes && (
+                  <Pergunta l="Rodapé" v={m.rodape_tipo} op={RODAPES} pode={pode} on={(v) => set("rodape_tipo", v as TipoRodape)} ajuda={m.rodape_tipo ? undefined : "Por responder (agora: igual às frentes)"} />
+                )}
+              </div>
               <div className="grid gap-3 sm:grid-cols-4 lg:grid-cols-8">
                 <Campo l="Ref." v={m.ref} on={(v) => set("ref", v.toUpperCase().replace(/\s/g, ""))} pode={pode} />
                 <div className="sm:col-span-2"><Campo l="Designação" v={m.designacao} on={(v) => set("designacao", v)} pode={pode} /></div>
@@ -695,8 +754,8 @@ function CartaoMovel({
                 <Sel l="Puxador" v={m.puxador} op={["Puxador exterior", "Gola / perfil", "Push-to-open", "Puxador embutido / fresado", "A definir"]} on={(v) => set("puxador", v)} pode={pode} />
               </div>
               <div className="grid gap-4 lg:grid-cols-2">
-                <EditorEspec titulo="Corpo" e={m.corpo} grupos={grupos} decors={decors} pode={pode} on={(e) => mudarEspec("corpo", e)} />
-                <EditorEspec titulo="Frentes (portas, gavetas, rodapé)" e={m.frente} grupos={grupos} decors={decors} pode={pode} on={(e) => mudarEspec("frente", e)} />
+                <EditorEspec titulo="Corpo" e={m.corpo} decors={decors} pode={pode} on={(e) => mudarEspec("corpo", e)} />
+                <EditorEspec titulo="Frentes (portas, gavetas, rodapé)" e={m.frente} decors={decors} pode={pode} on={(e) => mudarEspec("frente", e)} />
               </div>
               <div>
                 <p className="mb-2 text-sm font-semibold">Checklist para o desenho</p>
@@ -737,27 +796,47 @@ function CartaoMovel({
 
 type Decor = { referencia: string; descricao: string; grupo: string };
 
-/** Lista fixa de decores: os do grupo escolhido ou, sem grupo, todos os laminados. */
-function SeletorDecor({ decors, grupo, valor, pode, onChange }: { decors: Decor[]; grupo: string; valor: string; pode: boolean; onChange: (ref: string, grupo: string) => void }) {
-  const lista = grupo ? decors.filter((d) => d.grupo === grupo) : decors;
-  const foraDaLista = valor && !lista.some((d) => d.referencia === valor);
+/** Lista fixa das referências de laminado (no Living trabalha-se por referência do fornecedor, sem grupos). */
+function SeletorDecor({ decors, valor, pode, onChange }: { decors: Decor[]; valor: string; pode: boolean; onChange: (ref: string) => void }) {
+  const foraDaLista = valor && !decors.some((d) => d.referencia === valor);
   return (
-    <>
-      <select className="campo" disabled={!pode} value={valor} onChange={(e) => onChange(e.target.value, decors.find((d) => d.referencia === e.target.value)?.grupo ?? "")}>
-        <option value="">—</option>
-        {foraDaLista && <option value={valor}>{valor} (fora da lista)</option>}
-        {lista.map((d) => (
-          <option key={d.referencia} value={d.referencia}>
-            {d.referencia}{d.descricao && d.descricao !== d.referencia ? ` · ${d.descricao}` : ""}{!grupo && d.grupo ? ` [${d.grupo}]` : ""}
-          </option>
-        ))}
-      </select>
-      <p className="mt-1 text-xs text-slate-500">{grupo ? `${lista.length} decor(es) do grupo ${grupo}.` : `Todos os laminados (${lista.length}). Escolha um grupo para filtrar.`}</p>
-    </>
+    <select className="campo" disabled={!pode} value={valor} onChange={(e) => onChange(e.target.value)}>
+      <option value="">—</option>
+      {foraDaLista && <option value={valor}>{valor} (fora da lista)</option>}
+      {decors.map((d) => (
+        <option key={d.referencia} value={d.referencia}>
+          {d.referencia}{d.descricao && d.descricao !== d.referencia ? ` · ${d.descricao}` : ""}
+        </option>
+      ))}
+    </select>
   );
 }
 
-function EditorEspec({ titulo, e, grupos, decors, pode, on }: { titulo: string; e: EspecMaterial; grupos: string[]; decors: Decor[]; pode: boolean; on: (e: EspecMaterial) => void }) {
+/** Pergunta com botões de escolha; fica a amarelo enquanto não tiver resposta. */
+function Pergunta<T extends string>({ l, v, op, on, pode, ajuda }: { l: string; v: T | undefined; op: { id: T; nome: string }[]; on: (v: T) => void; pode: boolean; ajuda?: string }) {
+  return (
+    <div className={`rounded-md border p-2 ${v ? "border-slate-200" : "border-amber-300 bg-amber-50"}`}>
+      <p className="rotulo">{l}</p>
+      <div className="flex flex-wrap gap-1">
+        {op.map((o) => (
+          <button
+            key={o.id}
+            type="button"
+            disabled={!pode}
+            aria-pressed={v === o.id}
+            onClick={() => on(o.id)}
+            className={`rounded border px-2 py-1 text-xs font-medium ${v === o.id ? "border-marca bg-marca text-white" : "border-slate-300 bg-white hover:border-slate-500"}`}
+          >
+            {o.nome}
+          </button>
+        ))}
+      </div>
+      {ajuda && <p className="mt-1 text-xs text-amber-800">{ajuda}</p>}
+    </div>
+  );
+}
+
+function EditorEspec({ titulo, e, decors, pode, on }: { titulo: string; e: EspecMaterial; decors: Decor[]; pode: boolean; on: (e: EspecMaterial) => void }) {
   const extraRotulo = e.material === "folheado" ? "Folha de madeira (€/m² por face)" : e.material === "lacado" ? "Lacagem (€/m² por face)" : e.material === "madeira" ? "Madeira maciça (€/m²)" : "";
   const perguntaOrla = e.material === "madeira" || e.material === "folheado";
   return (
@@ -769,19 +848,10 @@ function EditorEspec({ titulo, e, grupos, decors, pode, on }: { titulo: string; 
           <Sel l="MDF" v={e.mdf} op={MDFS.map((m) => m.id)} rot={Object.fromEntries(MDFS.map((m) => [m.id, m.nome]))} on={(v) => on({ ...e, mdf: v as EspecMaterial["mdf"] })} pode={pode} />
         )}
         {e.material === "laminado" ? (
-          <>
-            <Sel
-              l="Grupo"
-              v={e.grupo}
-              op={grupos}
-              on={(v) => on({ ...e, grupo: v, acabamento: v && decors.some((d) => d.referencia === e.acabamento && d.grupo && d.grupo !== v) ? "" : e.acabamento })}
-              pode={pode}
-            />
-            <div className="sm:col-span-2">
-              <label className="rotulo">Decor (referência)</label>
-              <SeletorDecor decors={decors} grupo={e.grupo} valor={e.acabamento} pode={pode} onChange={(ref, g) => on({ ...e, acabamento: ref, grupo: e.grupo || g })} />
-            </div>
-          </>
+          <div className="sm:col-span-2">
+            <label className="rotulo">Decor (referência)</label>
+            <SeletorDecor decors={decors} valor={e.acabamento} pode={pode} onChange={(ref) => on({ ...e, acabamento: ref, grupo: "" })} />
+          </div>
         ) : (
           <div>
             <label className="rotulo">{e.material === "lacado" ? "Cor (RAL / ref.)" : "Folha / madeira"}</label>

@@ -9,7 +9,7 @@ export async function carregarCatalogo(): Promise<Catalogo> {
   const [par, grupos, precos, acab, mats, fer, postos] = await Promise.all([
     sb.from("parametros").select("chave,valor"),
     sb.from("grupos_laminado").select("id,codigo"),
-    sb.from("precos_grupo_laminado").select("grupo_id,acabamento_id,tipo,espessura_mm,medida,preco_m2"),
+    sb.from("precos_grupo_laminado").select("grupo_id,acabamento_id,tipo,espessura_mm,medida,preco_m2,preco_m2_palete,preco_m2_camiao"),
     sb.from("acabamentos").select("id,referencia,grupo_id").not("grupo_id", "is", null),
     sb.from("materias_primas").select("categoria,espessura_mm,preco,desconto_pct,ativo").in("categoria", ["mdf", "mdf_hidrofugo", "mdf_ignifugo", "aglomerado"]),
     sb.from("ferragens").select("ref_famo,descricao,preco,unidade,ativo").eq("ativo", true),
@@ -31,13 +31,15 @@ export async function carregarCatalogo(): Promise<Catalogo> {
       desperdicio_pct: p.desperdicio_materia ?? 30,
       orla_preco_ml: p.orla_preco_ml ?? 0.72,
     },
-    gruposPreco: ((precos.data as { grupo_id: string; acabamento_id: string | null; tipo: string; espessura_mm: number; medida: string | null; preco_m2: number | null }[]) ?? []).map((x) => ({
+    gruposPreco: ((precos.data as { grupo_id: string; acabamento_id: string | null; tipo: string; espessura_mm: number; medida: string | null; preco_m2: number | null; preco_m2_palete: number | null; preco_m2_camiao: number | null }[]) ?? []).map((x) => ({
       grupo: grupoCod[x.grupo_id],
       acabamento: x.acabamento_id ? acabRef[x.acabamento_id]?.referencia ?? null : null,
       tipo: x.tipo,
       espessura: Number(x.espessura_mm),
       medida: x.medida,
       preco: x.preco_m2 == null ? null : Number(x.preco_m2),
+      palete: x.preco_m2_palete == null ? null : Number(x.preco_m2_palete),
+      camiao: x.preco_m2_camiao == null ? null : Number(x.preco_m2_camiao),
     })),
     acabamentoGrupo: Object.fromEntries(Object.values(acabRef).map((a) => [norm(a.referencia ?? ""), grupoCod[a.grupo_id]])),
     mdf: ((mats.data as { categoria: string; espessura_mm: number; preco: number | null; desconto_pct: number | null; ativo: boolean }[]) ?? [])
