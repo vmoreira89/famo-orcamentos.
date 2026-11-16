@@ -197,12 +197,13 @@ export function aplicarFrentes(m: Movel, f: TipoFrentes): Movel {
   return { ...m, frentes: f, portas, gavetas };
 }
 
-export type TipoRodape = "mdf" | "laminado" | "inox" | "inox_pintar";
+export type TipoRodape = "mdf" | "laminado" | "inox" | "inox_pintar" | "sem";
 export const RODAPES: { id: TipoRodape; nome: string }[] = [
   { id: "mdf", nome: "MDF" },
   { id: "laminado", nome: "Laminado" },
   { id: "inox", nome: "Inox" },
   { id: "inox_pintar", nome: "Inox (p/ pintar)" },
+  { id: "sem", nome: "Sem rodapé" },
 ];
 
 /** Preço dos laminados a aplicar no orçamento: à placa (por defeito), à palete ou ao camião. */
@@ -603,7 +604,7 @@ export function decompor(m: Movel, cat: Catalogo, escalao: Escalao = "placa"): M
   }
   // rodapé: MDF (sem orla), laminado (como as peças laminadas) ou inox (perfil ao metro, vai para as ferragens)
   const rod = m.rodape_tipo;
-  if (TIPOS_MOVEL[m.tipo].pes && rod !== "inox" && rod !== "inox_pintar") {
+  if (TIPOS_MOVEL[m.tipo].pes && rod !== "inox" && rod !== "inox_pintar" && rod !== "sem") {
     if (rod === "mdf") {
       // MDF lacado (sem orla) ou folheado (folha de madeira na face vista e orla em folha de madeira em todo o perímetro)
       const ac = m.rodape_acabamento;
@@ -663,7 +664,7 @@ export function decompor(m: Movel, cat: Catalogo, escalao: Escalao = "placa"): M
   if (TIPOS_MOVEL[m.tipo].pes) {
     fs.push(ferr(cat, "03.6.432.01", 4));
     fs.push(ferr(cat, "03.6.433.01", 4));
-    fs.push(ferr(cat, "03.2.761.01", 1));
+    if (rod !== "sem") fs.push(ferr(cat, "03.2.761.01", 1)); // união do rodapé
   }
   if (m.tipo === "roupeiro") fs.push(ferr(cat, "03.2.401.01", 2, "Suporte varão"));
 

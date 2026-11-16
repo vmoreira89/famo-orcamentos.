@@ -141,7 +141,7 @@ export function modelo3d(m: Movel): Painel[] {
     }
   }
   if (y0 > 0) {
-    ps.push({ nome: "Rodapé", tipo: "rodape", x: 0, y: 0, z: RECUO_RODAPE, w: L, h: y0 - 2, d: E, ref: ref("Rodapé") });
+    if (m.rodape_tipo !== "sem") ps.push({ nome: "Rodapé", tipo: "rodape", x: 0, y: 0, z: RECUO_RODAPE, w: L, h: y0 - 2, d: E, ref: ref("Rodapé") });
     for (const x of [60, L - 60]) for (const z of [90, P - 60]) ps.push({ nome: "Pé", tipo: "pe", x: x - 20, y: 0, z: z - 20, w: 40, h: y0, d: 40 });
   }
   return ps;

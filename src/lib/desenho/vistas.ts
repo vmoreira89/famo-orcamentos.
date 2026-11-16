@@ -46,7 +46,7 @@ export function entidadesFrente(m: Movel, dx = 0, dy = 0): Entidade[] {
       ents.push({ t: "poligono", pts: [[a, b], [a + p.w, b], [a + p.w, b + p.h], [a, b + p.h]] });
     } else ents.push(...r(p.x, p.y, p.w, p.h));
   }
-  if (y0 > 0) for (const p of ps.filter((x) => x.tipo === "pe")) ents.push(...r(p.x, 0, p.w, y0 - 2, { tracejado: true, fina: true }));
+  if (y0 > 0) for (const p of ps.filter((x) => x.tipo === "pe")) ents.push(...r(p.x, 0, p.w, y0 - 2, { tracejado: m.rodape_tipo !== "sem", fina: m.rodape_tipo !== "sem" }));
   return ents;
 }
 
