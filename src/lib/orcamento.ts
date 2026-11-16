@@ -125,6 +125,7 @@ export type Movel = {
   frentes?: TipoFrentes; // resposta à pergunta «portas / gavetas / portas e gavetas»
   topo_sobre_ilhargas?: boolean; // tampo/travessas por cima das ilhargas (por defeito: por dentro)
   rodape_tipo?: TipoRodape; // cozinhas
+  rodape_acabamento?: "lacado" | "folheado"; // quando o rodapé é em MDF
   codigo?: string;
 };
 
@@ -530,8 +531,22 @@ export function decompor(m: Movel, cat: Catalogo, escalao: Escalao = "placa"): M
   const rod = m.rodape_tipo;
   if (TIPOS_MOVEL[m.tipo].pes && rod !== "inox" && rod !== "inox_pintar") {
     if (rod === "mdf") {
-      const pm = precoPlaca(cat, { material: "lacado", mdf: m.frente.mdf || "hidrofugo", acabamento: "", grupo: "", extra_m2: null }, e);
-      pecas.push(peca({ designacao: "Rodapé", c: L, l: 100, sup: "manual", preco_m2: pm.m2, preco_extra_m2: null, faces_extra: 0, preco_orla_ml: null, orlas: [false, false, false, false], oc: 0, ol: 0, nota: `Rodapé MDF ${m.frente.mdf || "hidrófugo"}` }));
+      // MDF lacado (sem orla) ou folheado (folha de madeira na face vista e orla em folha de madeira em todo o perímetro)
+      const ac = m.rodape_acabamento;
+      const mdf = m.frente.mdf || "hidrofugo";
+      const pm = precoPlaca(cat, { material: "lacado", mdf, acabamento: "", grupo: "", extra_m2: null }, e);
+      // preço do acabamento: o das frentes, se forem do mesmo material; senão fica por preencher
+      const extra = ac && m.frente.material === ac ? m.frente.extra_m2 : null;
+      const folha = ac === "folheado";
+      pecas.push(peca({
+        designacao: "Rodapé", c: L, l: 100, sup: "manual",
+        preco_m2: pm.m2,
+        faces_extra: ac ? 1 : 0,
+        preco_extra_m2: ac ? extra : null,
+        orlas: folha ? [true, true, true, true] : [false, false, false, false], oc: folha ? 2 : 0, ol: folha ? 2 : 0,
+        preco_orla_ml: folha ? cat.parametros.orla_preco_ml : null,
+        nota: `Rodapé MDF ${mdf}${ac === "lacado" ? ` lacado ${m.frente.material === "lacado" ? m.frente.acabamento : ""}` : folha ? ` folheado ${m.frente.material === "folheado" ? m.frente.acabamento : ""}, orla em folha de madeira` : ""}`.trim(),
+      }));
     } else if (rod === "laminado") {
       const lam = m.frente.material === "laminado" ? m.frente : m.corpo.material === "laminado" ? m.corpo : { ...m.frente, material: "laminado" as const, acabamento: "" };
       const pl = precoPlaca(cat, lam, e, escalao);

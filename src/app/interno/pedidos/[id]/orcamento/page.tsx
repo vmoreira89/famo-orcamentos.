@@ -738,6 +738,16 @@ function CartaoMovel({
                 {cozinha && TIPOS_MOVEL[m.tipo].pes && (
                   <Pergunta l="Rodapé" v={m.rodape_tipo} op={RODAPES} pode={pode} on={(v) => set("rodape_tipo", v as TipoRodape)} ajuda={m.rodape_tipo ? undefined : "Por responder (agora: igual às frentes)"} />
                 )}
+                {cozinha && TIPOS_MOVEL[m.tipo].pes && m.rodape_tipo === "mdf" && (
+                  <Pergunta
+                    l="Rodapé MDF: acabamento"
+                    v={m.rodape_acabamento}
+                    op={[{ id: "lacado", nome: "Lacado" }, { id: "folheado", nome: "Folheado" }]}
+                    pode={pode}
+                    on={(v) => set("rodape_acabamento", v)}
+                    ajuda={m.rodape_acabamento ? (m.rodape_acabamento === "folheado" ? "Folha de madeira na face vista e orla em folha de madeira." : "Lacagem na face vista, sem orla.") : "Por responder (agora: MDF em cru)"}
+                  />
+                )}
               </div>
               <div className="grid gap-3 sm:grid-cols-4 lg:grid-cols-8">
                 <Campo l="Ref." v={m.ref} on={(v) => set("ref", v.toUpperCase().replace(/\s/g, ""))} pode={pode} />
@@ -814,7 +824,7 @@ function Pergunta<T extends string>({ l, v, op, on, pode, ajuda }: { l: string; 
           </button>
         ))}
       </div>
-      {ajuda && <p className="mt-1 text-xs text-amber-800">{ajuda}</p>}
+      {ajuda && <p className={`mt-1 text-xs ${v ? "text-slate-500" : "text-amber-800"}`}>{ajuda}</p>}
     </div>
   );
 }
