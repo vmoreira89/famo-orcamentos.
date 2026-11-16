@@ -911,7 +911,25 @@ function CartaoMovel({
               )}
               <div className="grid gap-4 lg:grid-cols-2">
                 <EditorEspec titulo="Corpo" e={m.corpo} decors={decors} pode={pode} on={(e) => mudarEspec("corpo", e)} />
-                <EditorEspec titulo="Frentes (portas, gavetas, rodapé)" frente e={m.frente} decors={decors} pode={pode} on={(e) => mudarEspec("frente", e)} />
+                {(() => {
+                  // o acabamento das frentes só se pede para o que ainda o usa
+                  const proprias = m.portas_diferentes && m.portas > 1 && m.tipo_porta !== "Correr" ? Object.keys(m.portas_acab ?? {}).filter((k) => Number(k) <= m.portas).length : 0;
+                  const portasFrente = m.portas - proprias;
+                  const rodapeFrente = TIPOS_MOVEL[m.tipo].pes && (m.rodape_tipo == null || m.rodape_tipo === "laminado");
+                  const partes = [portasFrente > 0 && (proprias > 0 ? `${portasFrente === 1 ? "porta" : "portas"} sem acabamento próprio` : "portas"), m.gavetas > 0 && "gavetas", rodapeFrente && "rodapé"].filter(Boolean) as string[];
+                  if (partes.length === 0)
+                    return (
+                      <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
+                        <p className="font-semibold text-slate-700">Frentes</p>
+                        <p className="mt-1">
+                          Não se aplica: {proprias > 0 ? "todas as portas têm acabamento próprio" : "o móvel não tem portas"}
+                          {m.gavetas === 0 ? ", não tem gavetas" : ""}
+                          {TIPOS_MOVEL[m.tipo].pes ? " e o rodapé tem acabamento próprio" : ""}.
+                        </p>
+                      </div>
+                    );
+                  return <EditorEspec titulo={`Frentes (${partes.join(", ")})`} frente={portasFrente > 0 || m.gavetas > 0} e={m.frente} decors={decors} pode={pode} on={(e) => mudarEspec("frente", e)} />;
+                })()}
               </div>
               <div>
                 <p className="mb-2 text-sm font-semibold">Checklist para o desenho</p>
