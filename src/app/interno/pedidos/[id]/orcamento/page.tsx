@@ -54,6 +54,9 @@ import type { PropostaMovel } from "@/lib/leitura";
 import { eOrcamentista, usePerfil } from "@/components/interno/ContextoInterno";
 
 type LinhaOrc = { versao: number; dados: DadosOrcamento; parametros: Parametros; margem_pct: number };
+type Rascunho = { versao_base: number | null; dados: DadosOrcamento; parametros: Parametros | null; margem_pct: number | null; updated_at: string };
+const hora = (s: string) => new Date(s).toLocaleString("pt-PT", { dateStyle: "short", timeStyle: "short" });
+const AUTOGRAVAR_MS = 30000;
 
 export default function EditorOrcamento() {
   const { id } = useParams<{ id: string }>();
@@ -76,10 +79,15 @@ export default function EditorOrcamento() {
   const [nFicheiros, setNFicheiros] = useState<Record<string, number>>({});
   const [leitura, setLeitura] = useState<Divisao | null>(null);
   const [erro, setErro] = useState("");
+  // rascunho: trabalho a meio, gravado sem motivo nem nova versão
+  const [rascunho, setRascunho] = useState<Rascunho | null>(null); // rascunho encontrado ao abrir, por decidir
+  const [rascunhoEm, setRascunhoEm] = useState<string | null>(null); // última gravação do rascunho
+  const [porGravar, setPorGravar] = useState(false); // alterações desde o último rascunho
+  const [aGravar, setAGravar] = useState(false);
 
   const carregar = useCallback(async () => {
     const sb = supabase();
-    const [p, d, o, pm, c, ac, gl, fi] = await Promise.all([
+    const [p, d, o, pm, c, ac, gl, fi, ra] = await Promise.all([
       sb.from("pedidos").select("*").eq("id", id).single(),
       sb.from("pedido_divisoes").select("*").eq("pedido_id", id).order("ordem"),
       sb.from("orcamentos").select("versao,dados,parametros,margem_pct").eq("pedido_id", id).maybeSingle(),
@@ -88,7 +96,12 @@ export default function EditorOrcamento() {
       sb.from("acabamentos").select("referencia,descricao,grupo_id").or("tipo.ilike.lam%,tipo.ilike.termolam%,grupo_id.not.is.null").eq("ativo", true).order("referencia").limit(3000),
       sb.from("grupos_laminado").select("id,codigo"),
       sb.from("pedido_ficheiros").select("divisao_id").eq("pedido_id", id),
+      sb.from("orcamento_rascunhos").select("versao_base,dados,parametros,margem_pct,updated_at").eq("pedido_id", id).maybeSingle(),
     ]);
+    const r = ra.data as Rascunho | null;
+    setRascunho(r);
+    setRascunhoEm(r?.updated_at ?? null);
+    setPorGravar(false);
     const nf: Record<string, number> = {};
     for (const f of (fi.data as { divisao_id: string | null }[]) ?? []) nf[f.divisao_id ?? "geral"] = (nf[f.divisao_id ?? "geral"] ?? 0) + 1;
     setNFicheiros(nf);
@@ -121,12 +134,29 @@ export default function EditorOrcamento() {
     carregar();
   }, [carregar]);
 
-  // aviso ao sair com alterações por guardar
+  /** Grava o ponto em que está (rascunho); não cria versão nem pede motivo. */
+  const gravarRascunho = useCallback(async () => {
+    setAGravar(true);
+    const { data, error } = await supabase().rpc("guardar_rascunho", { p_pedido: id, p_versao_base: versao, p_dados: dados, p_parametros: par, p_margem: margem });
+    setAGravar(false);
+    if (error) return alert(`Não foi possível gravar o rascunho: ${error.message}`);
+    setRascunhoEm(data as string);
+    setPorGravar(false);
+  }, [id, versao, dados, par, margem]);
+
+  // gravação automática do rascunho, 30 s depois da última alteração
   useEffect(() => {
-    const f = (e: BeforeUnloadEvent) => { if (sujo) e.preventDefault(); };
+    if (!porGravar || rascunho || !perm?.pode_editar) return;
+    const t = setTimeout(() => { gravarRascunho(); }, AUTOGRAVAR_MS);
+    return () => clearTimeout(t);
+  }, [porGravar, rascunho, perm, gravarRascunho]);
+
+  // aviso ao sair com alterações por gravar
+  useEffect(() => {
+    const f = (e: BeforeUnloadEvent) => { if (porGravar) e.preventDefault(); };
     window.addEventListener("beforeunload", f);
     return () => window.removeEventListener("beforeunload", f);
-  }, [sujo]);
+  }, [porGravar]);
 
   const moveisComCodigo = useMemo(
     () => (pedido ? codigos(pedido.numero_projecto, divisoes, dados.moveis) : dados.moveis),
@@ -152,7 +182,22 @@ export default function EditorOrcamento() {
   const alterar = (fn: (d: DadosOrcamento) => DadosOrcamento) => {
     setDados((d) => fn(d));
     setSujo(true);
+    setPorGravar(true);
   };
+  function continuarRascunho(r: Rascunho) {
+    setDados({ moveis: r.dados.moveis ?? [], extras_gerais: r.dados.extras_gerais ?? [], tampos: r.dados.tampos ?? {}, escalao_laminado: r.dados.escalao_laminado ?? "placa" });
+    if (r.parametros?.custo_minuto != null) setPar(r.parametros);
+    if (r.margem_pct != null) setMargem(Number(r.margem_pct));
+    setRascunho(null);
+    setSujo(true);
+    setPorGravar(false);
+  }
+  async function descartarRascunho() {
+    if (!confirm("Descartar o rascunho? O trabalho não guardado como versão perde-se.")) return;
+    await supabase().rpc("apagar_rascunho", { p_pedido: id });
+    setRascunho(null);
+    setRascunhoEm(null);
+  }
   const alterarMovel = (mid: string, fn: (m: Movel) => Movel) =>
     alterar((d) => ({ ...d, moveis: d.moveis.map((m) => (m.id === mid ? fn(m) : m)) }));
 
@@ -228,7 +273,10 @@ export default function EditorOrcamento() {
               <button className="btn-secundario" onClick={actualizarTudo} title="Volta a ler preços e parâmetros da base de dados">
                 Actualizar preços
               </button>
-              <button className="btn-primario" disabled={!sujo} onClick={() => setGuardar(true)}>
+              <button className="btn-secundario" disabled={!porGravar || aGravar || !!rascunho} onClick={gravarRascunho} title="Grava o ponto em que está, para continuar mais tarde (não cria versão)">
+                {aGravar ? "A gravar…" : porGravar ? "Guardar rascunho" : "Rascunho gravado"}
+              </button>
+              <button className="btn-primario" disabled={!sujo} onClick={() => setGuardar(true)} title="Grava uma versão oficial do orçamento (pede motivo)">
                 {sujo ? "Guardar orçamento" : "Guardado"}
               </button>
             </>
@@ -257,13 +305,26 @@ export default function EditorOrcamento() {
         </p>
       )}
 
+      {pode && rascunho && (
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-md border border-sky-300 bg-sky-50 px-4 py-3 text-sm">
+          <span>
+            <strong>Tem um rascunho gravado em {hora(rascunho.updated_at)}.</strong> Quer continuar a partir daí?
+            {rascunho.versao_base !== versao && <span className="block text-amber-800">Atenção: o orçamento foi guardado como versão {versao} depois de o rascunho ter começado (v{rascunho.versao_base ?? "—"}).</span>}
+          </span>
+          <span className="flex gap-2">
+            <button className="btn-primario" onClick={() => continuarRascunho(rascunho)}>Continuar o rascunho</button>
+            <button className="btn-secundario" onClick={descartarRascunho}>Descartar</button>
+          </span>
+        </div>
+      )}
+
       {/* Resumo */}
       <section className="cartao mt-4 grid gap-4 p-5 sm:grid-cols-2 lg:grid-cols-5">
         <Resumo titulo="Custo total" valor={euro(totais.custo)} />
         <div>
           <label className="text-xs uppercase text-slate-500" htmlFor="margem">Margem</label>
           <div className="mt-1 flex items-center gap-1">
-            <CampoNumero id="margem" className="campo w-24" disabled={!pode} valor={margem} onValor={(v) => { setMargem(v ?? 0); setSujo(true); }} />
+            <CampoNumero id="margem" className="campo w-24" disabled={!pode} valor={margem} onValor={(v) => { setMargem(v ?? 0); setSujo(true); setPorGravar(true); }} />
             <span className="text-sm">%</span>
           </div>
         </div>
@@ -429,6 +490,10 @@ export default function EditorOrcamento() {
           setVersao(data as number);
           setDados(final);
           setSujo(false);
+          // a versão oficial passa a ser o ponto de partida: o rascunho deixa de ser preciso
+          await supabase().rpc("apagar_rascunho", { p_pedido: id });
+          setRascunhoEm(null);
+          setPorGravar(false);
           return null;
         }}
       />
@@ -449,6 +514,19 @@ export default function EditorOrcamento() {
       )}
 
       {leitura && <DialogoLeitura divisao={leitura} aberto onFechar={() => setLeitura(null)} onAcrescentar={(ps) => acrescentarLidos(leitura, ps)} />}
+
+      {pode && sujo && !rascunho && (
+        <div className="sticky bottom-0 z-40 -mx-4 mt-6 flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 bg-white/95 px-4 py-3 shadow-[0_-2px_8px_rgba(0,0,0,0.06)] backdrop-blur">
+          <span className="text-sm text-slate-600">
+            {porGravar ? "Alterações por gravar." : "Trabalho gravado em rascunho."}
+            {rascunhoEm && <> Último rascunho: {hora(rascunhoEm)}.</>} O rascunho grava-se sozinho 30 s depois de cada alteração.
+          </span>
+          <span className="flex gap-2">
+            <button className="btn-secundario" disabled={!porGravar || aGravar} onClick={gravarRascunho}>{aGravar ? "A gravar…" : "Guardar rascunho"}</button>
+            <button className="btn-primario" onClick={() => setGuardar(true)}>Guardar orçamento (nova versão)</button>
+          </span>
+        </div>
+      )}
 
       <DialogoRelatorio aberto={relatorio} onFechar={() => setRelatorio(false)} onEscolher={(tipo, formato) => router.push(`/interno/pedidos/${id}/relatorio?tipo=${tipo}&formato=${formato}`)} />
     </div>
