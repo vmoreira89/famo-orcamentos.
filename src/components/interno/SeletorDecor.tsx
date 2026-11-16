@@ -18,6 +18,7 @@ export default function SeletorDecor({ decors, valor, pode, onChange }: { decors
   const [activo, setActivo] = useState(0);
   const [aviso, setAviso] = useState("");
   const lista = useRef<HTMLUListElement>(null);
+  const acabouDeEscolher = useRef(false); // o clique na lista dispara o blur antes de o estado mudar
 
   const q = norm(texto ?? "");
   const resultados = useMemo(() => {
@@ -29,6 +30,7 @@ export default function SeletorDecor({ decors, valor, pode, onChange }: { decors
 
   const desc = decors.find((d) => d.referencia === valor)?.descricao;
   const escolher = (ref: string) => {
+    acabouDeEscolher.current = true;
     onChange(ref);
     setTexto(null);
     setAviso("");
@@ -54,10 +56,11 @@ export default function SeletorDecor({ decors, valor, pode, onChange }: { decors
         aria-autocomplete="list"
         placeholder="Escreva para pesquisar…"
         value={texto ?? (valor ? `${valor}${desc && desc !== valor ? ` · ${desc}` : ""}` : "")}
-        onFocus={() => { setTexto(""); setActivo(0); }}
-        onChange={(e) => { setTexto(e.target.value); setActivo(0); setAviso(""); }}
+        onFocus={() => { setTexto(""); setActivo(0); acabouDeEscolher.current = false; }}
+        onChange={(e) => { setTexto(e.target.value); setActivo(0); setAviso(""); acabouDeEscolher.current = false; }}
         onBlur={() => {
           // escrito mas não escolhido: não grava
+          if (acabouDeEscolher.current) { acabouDeEscolher.current = false; setTexto(null); return; }
           if (texto) {
             const exacta = decors.find((d) => norm(d.referencia) === norm(texto));
             if (exacta) escolher(exacta.referencia);

@@ -65,6 +65,21 @@ export function precoFrente(cat: Catalogo, esp: EspecMaterial, e: number, escala
   return { m2: mdf, extra: esp.extra_m2, faces: 1, dentro: de.extra_m2, faceDentro: true, nota: `MDF ${esp.mdf || "normal"}. ${nota}` };
 }
 
+/** Portas sobrepostas (lockers, colunas estreitas) ou lado a lado; sem resposta, deduz pela largura. */
+export function disposicaoPortas(m: Pick<Movel, "portas" | "L" | "portas_disposicao">): "lado" | "sobrepostas" {
+  if (m.portas_disposicao) return m.portas_disposicao;
+  return m.portas > 1 && (m.L - 3 * (m.portas + 1)) / m.portas < 250 ? "sobrepostas" : "lado";
+}
+/** Acabamento de uma porta (nº 1 = de cima, ou da esquerda se lado a lado). */
+export function especPorta(m: Movel, n: number): EspecMaterial {
+  return (m.portas_diferentes && m.portas_acab?.[String(n)]) || m.frente;
+}
+/** Acabamento que se aplica a uma peça (porta com acabamento próprio, frentes ou corpo). */
+export function especDaPeca(m: Movel, p: Pick<Peca, "sup" | "porta">): EspecMaterial {
+  if (p.porta) return especPorta(m, p.porta);
+  return p.sup === "frente" ? m.frente : m.corpo;
+}
+
 /** Laminado: orla em todo o perímetro. Lacado: sem orla. Madeira/folheado: só se pedido. */
 export function levaOrla(esp: EspecMaterial) {
   if (esp.material === "laminado") return true;
@@ -83,7 +98,7 @@ export function aplicarOrlas(m: Movel, cat?: Catalogo): Movel {
     ...m,
     pecas: m.pecas.map((p) => {
       if (p.sup === "manual") return p;
-      const esp = p.sup === "frente" ? m.frente : m.corpo;
+      const esp = especDaPeca(m, p);
       const o = orlasPara(esp);
       return { ...p, ...o, preco_orla_ml: o.oc ? (cat ? precoOrla(cat, esp) : p.preco_orla_ml ?? null) : p.preco_orla_ml };
     }),
@@ -109,6 +124,7 @@ export type Peca = {
   preco_dentro_m2?: number | null; // €/m² da face de dentro (folha, laca ou laminado aplicado)
   preco_orla_ml: number | null;
   nota: string; // ex.: folha de madeira a usar
+  porta?: number; // porta com acabamento próprio (nº de cima para baixo / da esquerda para a direita)
   codigo?: string;
   codigo_sub?: string;
 };
@@ -158,6 +174,9 @@ export type Movel = {
   topo_sobre_ilhargas?: boolean; // tampo/travessas por cima das ilhargas (por defeito: por dentro)
   rodape_tipo?: TipoRodape; // cozinhas
   rodape_acabamento?: "lacado" | "folheado"; // quando o rodapé é em MDF
+  portas_disposicao?: "lado" | "sobrepostas"; // portas lado a lado (esq.→dir.) ou sobrepostas (cima→baixo)
+  portas_diferentes?: boolean; // acabamento próprio em todas ou algumas portas
+  portas_acab?: Record<string, EspecMaterial>; // nº da porta (1 = de cima / da esquerda) → acabamento próprio
   codigo?: string;
 };
 
@@ -554,9 +573,27 @@ export function decompor(m: Movel, cat: Catalogo, escalao: Escalao = "placa"): M
     pecas.push(peca({ designacao: `Traseira gaveta ${g}`, c: caixa - 32, l: hCaixa - 16, e: 16, subconjunto: sub, ...semExtra }));
     pecas.push(peca({ designacao: `Fundo gaveta ${g}`, c: caixa - 32, l: Lc - 16, e: 16, subconjunto: sub, ...semExtra }));
   }
+  const sobrepostas = disposicaoPortas(m) === "sobrepostas";
+  // portas sobrepostas: dividem a altura (de cima para baixo); lado a lado: dividem a largura
+  const altPorta = sobrepostas && m.portas > 1 ? Math.floor((altPortas - folga * (m.portas - 1)) / m.portas) : altPortas;
   if (m.portas > 0 && m.tipo_porta !== "Correr") {
-    const larg = m.portas === 1 ? L - 2 * folga : Math.floor((L - folga * (m.portas + 1)) / m.portas);
-    pecas.push(peca({ designacao: m.portas === 1 ? "Porta" : "Porta batente", qtd: m.portas, c: altPortas, l: larg, sup: "frente" }));
+    const larg = m.portas === 1 || sobrepostas ? L - 2 * folga : Math.floor((L - folga * (m.portas + 1)) / m.portas);
+    if (m.portas > 1 && m.portas_diferentes) {
+      // uma linha por porta, cada uma com o seu acabamento
+      for (let n = 1; n <= m.portas; n++) {
+        const ep = especPorta(m, n);
+        const f = precoFrente(cat, ep, e, escalao);
+        pecas.push(peca({
+          designacao: `Porta ${n}`, c: altPorta, l: larg, sup: "frente", porta: n,
+          preco_m2: f.m2, preco_extra_m2: f.faces > 0 ? f.extra : null, faces_extra: f.faces,
+          ...(f.faceDentro ? { face_dentro: true, preco_dentro_m2: f.dentro } : { face_dentro: false, preco_dentro_m2: null }),
+          ...orlasPara(ep), preco_orla_ml: precoOrla(cat, ep),
+          nota: [ep !== m.frente ? `Acabamento próprio: ${ep.material} ${ep.acabamento}`.trim() : "", f.nota].filter(Boolean).join(" · "),
+        }));
+      }
+    } else {
+      pecas.push(peca({ designacao: m.portas === 1 ? "Porta" : "Porta batente", qtd: m.portas, c: altPorta, l: larg, sup: "frente" }));
+    }
   } else if (m.portas > 0) {
     const larg = Math.floor(L / m.portas) + 30;
     pecas.push(peca({ designacao: "Porta de correr", qtd: m.portas, c: A - 40, l: larg, sup: "frente" }));
@@ -593,7 +630,7 @@ export function decompor(m: Movel, cat: Catalogo, escalao: Escalao = "placa"): M
   // Ferragens
   const fs: LinhaFerragem[] = [];
   if (m.portas > 0 && m.tipo_porta !== "Correr") {
-    const porPorta = altPortas <= 900 ? 2 : altPortas <= 1600 ? 3 : 4;
+    const porPorta = altPorta <= 900 ? 2 : altPorta <= 1600 ? 3 : 4;
     fs.push(ferr(cat, "03.2.387.01", m.portas * porPorta));
     fs.push(ferr(cat, "03.2.501.01", m.portas * porPorta));
   }
@@ -654,7 +691,7 @@ export function decompor(m: Movel, cat: Catalogo, escalao: Escalao = "placa"): M
 export function actualizarPrecos(m: Movel, cat: Catalogo, escalao: Escalao = "placa"): Movel {
   const pecas = m.pecas.map((p) => {
     if (p.sup === "manual") return p;
-    const esp = p.sup === "frente" ? m.frente : m.corpo;
+    const esp = especDaPeca(m, p);
     if (p.sup === "frente") {
       const f = precoFrente(cat, esp, p.e, escalao);
       return { ...p, preco_m2: f.m2, preco_extra_m2: f.faces > 0 ? f.extra : null, faces_extra: f.faces, face_dentro: f.faceDentro, preco_dentro_m2: f.dentro, preco_orla_ml: precoOrla(cat, esp), nota: f.nota || p.nota };
@@ -676,15 +713,16 @@ export function aplicarEscalao(m: Movel, cat: Catalogo, escalao: Escalao): Movel
       if (p.sup === "manual") {
         if (m.tipo === "tampo" && m.corpo.material === "laminado") esp = m.corpo;
         else if (p.designacao === "Rodapé" && m.rodape_tipo === "laminado") esp = m.frente.material === "laminado" ? m.frente : m.corpo;
-      } else if (p.sup === "frente" && m.frente.faces === "diferentes" && m.frente.dentro) {
+      } else if (p.sup === "frente" && especDaPeca(m, p).faces === "diferentes" && especDaPeca(m, p).dentro) {
         // bi-decor laminado: preço pela regra das frentes
-        if (m.frente.material === "laminado" && m.frente.dentro.material === "laminado") {
-          const v = precoFrente(cat, m.frente, p.e, escalao).m2;
+        const ef = especDaPeca(m, p);
+        if (ef.material === "laminado" && ef.dentro!.material === "laminado") {
+          const v = precoFrente(cat, ef, p.e, escalao).m2;
           return v == null ? p : { ...p, preco_m2: v };
         }
         return p;
       } else {
-        const e = p.sup === "frente" ? m.frente : m.corpo;
+        const e = especDaPeca(m, p);
         if (e.material === "laminado") esp = e;
       }
       if (!esp || esp.material !== "laminado") return p;

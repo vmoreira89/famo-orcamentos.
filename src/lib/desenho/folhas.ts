@@ -1,7 +1,7 @@
 import type { PDFDocument } from "pdf-lib";
 import type { Divisao } from "../pedido";
 import { nomeDivisao, nomeMaterial, nomeMateriais, nomeMdf } from "../pedido";
-import { arestasOrla, movelTampo, type EspecMaterial, type Movel, type Peca, type Tampo } from "../orcamento";
+import { arestasOrla, especDaPeca, movelTampo, type EspecMaterial, type Movel, type Peca, type Tampo } from "../orcamento";
 import { deslocar, furacao, juntar, legendaFuros, limites, rect, vistaPeca, type Entidade } from "./geometria";
 import { puxadorDe, frentesDoMovel, iso, type Painel } from "./modelo3d";
 import {
@@ -45,9 +45,6 @@ export function descMaterial(e: EspecMaterial, esp: number) {
   if (e.material === "laminado") return `Laminado ${e.acabamento || e.grupo || ""} ${esp}mm`.trim();
   if (e.material === "madeira") return `Madeira maciça ${e.acabamento} ${esp}mm`.trim();
   return `${nomeMdf(e.mdf || "normal")} ${esp}mm`;
-}
-function especDaPeca(m: Movel, p: Peca) {
-  return p.sup === "frente" ? m.frente : m.corpo;
 }
 
 async function finalizar(doc: PDFDocument) {

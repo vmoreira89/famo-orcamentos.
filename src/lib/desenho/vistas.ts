@@ -74,7 +74,7 @@ export function vistaFrenteMovel(m: Movel): Vista {
   for (let i = 0; i < pontos.length - 1; i++) if (pontos[i + 1] - pontos[i] > 10) ents.push({ t: "cota", x1: m.L, y1: pontos[i], x2: m.L, y2: pontos[i + 1], off: 60 });
   // larguras das portas
   const portas = fr.filter((f) => f.tipo === "porta");
-  if (portas.length > 1) for (const f of portas) ents.push({ t: "cota", x1: f.x, y1: y0, x2: f.x + f.w, y2: y0, off: -45 });
+  if (portas.length > 1 && new Set(portas.map((f) => Math.round(f.x))).size > 1) for (const f of portas) ents.push({ t: "cota", x1: f.x, y1: y0, x2: f.x + f.w, y2: y0, off: -45 });
   return limites(ents);
 }
 

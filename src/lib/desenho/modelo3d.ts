@@ -5,7 +5,7 @@
  */
 import type { Movel } from "../orcamento";
 import { TIPOS_MOVEL } from "../orcamento";
-import { comprimentoCorredica } from "../orcamento";
+import { comprimentoCorredica, disposicaoPortas } from "../orcamento";
 
 /** Posições das dobradiças ao longo da porta (a 100 mm dos topos). */
 export function posicoesDobradica(altura: number): number[] {
@@ -34,7 +34,7 @@ export function alturaPes(m: Movel) {
   return TIPOS_MOVEL[m.tipo].pes ? ALT_PES : 0;
 }
 
-export type Frente = { tipo: "porta" | "gaveta"; x: number; y: number; w: number; h: number; dobradicaEsq: boolean };
+export type Frente = { tipo: "porta" | "gaveta"; x: number; y: number; w: number; h: number; dobradicaEsq: boolean; n?: number };
 
 /** Divisão da face da frente em gavetas (em cima) e portas (em baixo). */
 export function frentesDoMovel(m: Movel): Frente[] {
@@ -48,11 +48,18 @@ export function frentesDoMovel(m: Movel): Frente[] {
   }
   if (m.portas > 0) {
     const h = y - (y0 + FOLGA);
-    const w = (m.L - FOLGA * (m.portas + 1)) / m.portas;
     const abertura = (m.checklist.abertura ?? "").toLowerCase();
-    for (let i = 0; i < m.portas; i++) {
-      const esq = m.portas === 1 ? !abertura.includes("direita") : i === 0;
-      out.push({ tipo: "porta", x: FOLGA + i * (w + FOLGA), y: y0 + FOLGA, w, h, dobradicaEsq: esq });
+    if (m.portas > 1 && disposicaoPortas(m) === "sobrepostas") {
+      // portas umas sobre as outras, numeradas de cima (1) para baixo
+      const hp = (h - FOLGA * (m.portas - 1)) / m.portas;
+      for (let i = 0; i < m.portas; i++)
+        out.push({ tipo: "porta", x: FOLGA, y: y - (i + 1) * hp - i * FOLGA, w: m.L - 2 * FOLGA, h: hp, dobradicaEsq: !abertura.includes("direita"), n: i + 1 });
+    } else {
+      const w = (m.L - FOLGA * (m.portas + 1)) / m.portas;
+      for (let i = 0; i < m.portas; i++) {
+        const esq = m.portas === 1 ? !abertura.includes("direita") : i === 0;
+        out.push({ tipo: "porta", x: FOLGA + i * (w + FOLGA), y: y0 + FOLGA, w, h, dobradicaEsq: esq, n: i + 1 });
+      }
     }
   }
   return out;
@@ -120,8 +127,10 @@ export function modelo3d(m: Movel): Painel[] {
   }
   let ig = 0;
   for (const f of fr) {
-    const nome = f.tipo === "gaveta" ? `Frente gaveta ${++ig}` : "Porta";
-    ps.push({ nome, tipo: "frente", x: f.x, y: f.y, z: -E - 2, w: f.w, h: f.h, d: E, ref: ref(f.tipo === "gaveta" ? `Frente gaveta ${ig}` : "Porta") });
+    const nome = f.tipo === "gaveta" ? `Frente gaveta ${++ig}` : m.portas > 1 ? `Porta ${f.n}` : "Porta";
+    // portas com acabamento próprio têm uma peça cada («Porta 1», «Porta 2»…)
+    const refPorta = m.pecas.find((p) => p.porta === f.n)?.codigo ?? ref("Porta");
+    ps.push({ nome, tipo: "frente", x: f.x, y: f.y, z: -E - 2, w: f.w, h: f.h, d: E, ref: f.tipo === "gaveta" ? ref(`Frente gaveta ${ig}`) : refPorta });
     const px = puxadorDe(m, f);
     if (px) ps.push({ nome: "Puxador", tipo: "puxador", x: px.x, y: px.y, z: -E - 2 - 25, w: px.w, h: px.h, d: 25 });
     if (f.tipo === "porta" && m.tipo_porta !== "Correr") {

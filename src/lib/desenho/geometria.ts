@@ -101,7 +101,11 @@ export function furacao(p: Peca, m: Movel): Furo[] {
   if (pp === "lado" || pp === "divisoria") {
     const larg = p.l;
     juntaTopo(E / 2, larg);
-    if (m.tipo === "inferior" || m.tipo === "gaveteiro") {
+    if (m.topo_sobre_ilhargas) {
+      // tampo/travessas por cima das ilhargas: cavilhas no topo superior da ilharga
+      const vs = m.tipo === "inferior" || m.tipo === "gaveteiro" ? [30, 70, larg - 70, larg - 30] : [70, larg - 70, ...(larg > 500 ? [Math.round(larg / 2)] : [])];
+      for (const v of vs) f.push({ u: p.c, v, d: 8, prof: 23, face: "T", desc: "cavilha 8x35 (topo)" });
+    } else if (m.tipo === "inferior" || m.tipo === "gaveteiro") {
       for (const v of [30, 70, larg - 70, larg - 30]) f.push({ u: p.c - E / 2, v, d: 8, prof: 15, face: "F", desc: "cavilha 8x35 (travessa)" });
     } else juntaTopo(p.c - E / 2, larg);
     // suportes de prateleira: Ø5x12, passo 32, a 37 mm da frente e de trás
@@ -125,11 +129,10 @@ export function furacao(p: Peca, m: Movel): Furo[] {
     // bases das dobradiças (Ø5x12 a 37 e 69 mm da frente)
     if (m.portas > 0 && m.tipo_porta !== "Correr") {
       const lado = p.designacao.toLowerCase().includes("direito") ? "dir" : "esq";
-      const abertura = (m.checklist.abertura ?? "").toLowerCase();
-      const recebe = m.portas >= 2 || (abertura.includes("esquerda") ? lado === "esq" : lado === "dir");
-      if (recebe) {
-        const altPorta = p.c - (m.gavetas > 0 ? m.gavetas * 183 : 0) - 6;
-        for (const u of posicoesDobradica(altPorta)) for (const v of [37, 69]) f.push({ u: u + 3, v, d: 5, prof: 12, face: "F", desc: "base dobradiça" });
+      // cada porta com dobradiças deste lado: bases à altura das dobradiças dessa porta
+      const y0 = TIPOS_PES(m);
+      for (const fr of frentesDoMovel(m).filter((x) => x.tipo === "porta" && (x.dobradicaEsq ? lado === "esq" : lado === "dir"))) {
+        for (const u of posicoesDobradica(fr.h)) for (const v of [37, 69]) f.push({ u: Math.round(fr.y - y0 + u), v, d: 5, prof: 12, face: "F", desc: "base dobradiça" });
       }
     }
   } else if (pp === "horizontal") {

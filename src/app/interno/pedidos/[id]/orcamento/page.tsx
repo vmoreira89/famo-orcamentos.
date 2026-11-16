@@ -12,6 +12,7 @@ import {
   actualizarPrecos,
   aplicarEscalao,
   aplicarFrentes,
+  disposicaoPortas,
   ESCALOES,
   FRENTES,
   RODAPES,
@@ -765,6 +766,71 @@ function CartaoMovel({
                 <Sel l="Tipo de porta" v={m.tipo_porta} op={["Batente", "Correr", "Basculante"]} on={(v) => set("tipo_porta", v)} pode={pode} />
                 <Sel l="Puxador" v={m.puxador} op={["Puxador exterior", "Gola / perfil", "Push-to-open", "Puxador embutido / fresado", "A definir"]} on={(v) => set("puxador", v)} pode={pode} />
               </div>
+              {m.portas > 1 && m.tipo_porta !== "Correr" && (
+                <div className="space-y-3 rounded-md border border-slate-200 p-3">
+                  <div className="grid gap-3 lg:grid-cols-2">
+                    <Pergunta
+                      l={`Disposição das ${m.portas} portas`}
+                      v={m.portas_disposicao}
+                      op={[{ id: "lado", nome: "Lado a lado (da esquerda para a direita)" }, { id: "sobrepostas", nome: "Sobrepostas (de cima para baixo)" }]}
+                      pode={pode}
+                      on={(v) => set("portas_disposicao", v)}
+                      ajuda={m.portas_disposicao ? undefined : `Por responder (pela largura: ${disposicaoPortas(m) === "sobrepostas" ? "sobrepostas" : "lado a lado"})`}
+                    />
+                    <Pergunta
+                      l="Acabamento das portas"
+                      v={m.portas_diferentes == null ? undefined : m.portas_diferentes ? "dif" : "iguais"}
+                      op={[{ id: "iguais", nome: "Todas iguais (como as frentes)" }, { id: "dif", nome: "Diferentes (todas ou algumas)" }]}
+                      pode={pode}
+                      on={(v) => set("portas_diferentes", v === "dif")}
+                    />
+                  </div>
+                  {m.portas_diferentes && (
+                    <div className="space-y-2">
+                      <p className="text-xs text-slate-600">
+                        Porta 1 é a {disposicaoPortas(m) === "sobrepostas" ? "de cima; contam de cima para baixo" : "da esquerda; contam da esquerda para a direita"}. Marque só as portas com acabamento diferente das frentes.
+                      </p>
+                      {Array.from({ length: m.portas }, (_, i) => i + 1).map((n) => {
+                        const propria = m.portas_acab?.[String(n)];
+                        return (
+                          <div key={n} className="rounded border border-slate-200 p-2">
+                            <label className="flex items-center gap-2 text-sm">
+                              <input
+                                type="checkbox"
+                                disabled={!pode}
+                                checked={!!propria}
+                                onChange={(ev) =>
+                                  onAlterar((x) => {
+                                    const acab = { ...(x.portas_acab ?? {}) };
+                                    if (ev.target.checked) acab[String(n)] = JSON.parse(JSON.stringify(x.frente));
+                                    else delete acab[String(n)];
+                                    return { ...x, portas_acab: acab };
+                                  })
+                                }
+                              />
+                              <strong>Porta {n}</strong>
+                              <span className="text-slate-500">{propria ? "· acabamento próprio" : "· igual às frentes"}</span>
+                            </label>
+                            {propria && (
+                              <div className="mt-2">
+                                <EditorEspec
+                                  titulo={`Porta ${n}`}
+                                  frente
+                                  e={propria}
+                                  decors={decors}
+                                  pode={pode}
+                                  on={(e) => onAlterar((x) => ({ ...x, portas_acab: { ...(x.portas_acab ?? {}), [String(n)]: e } }))}
+                                />
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                  {pode && <p className="text-xs text-amber-700">Depois de mudar a disposição ou os acabamentos das portas, use «Regenerar listas» (cria uma linha por porta).</p>}
+                </div>
+              )}
               <div className="grid gap-4 lg:grid-cols-2">
                 <EditorEspec titulo="Corpo" e={m.corpo} decors={decors} pode={pode} on={(e) => mudarEspec("corpo", e)} />
                 <EditorEspec titulo="Frentes (portas, gavetas, rodapé)" frente e={m.frente} decors={decors} pode={pode} on={(e) => mudarEspec("frente", e)} />
