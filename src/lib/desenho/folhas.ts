@@ -1,9 +1,9 @@
 import type { PDFDocument } from "pdf-lib";
 import type { Divisao } from "../pedido";
 import { nomeDivisao, nomeMaterial, nomeMateriais, nomeMdf } from "../pedido";
-import { arestasOrla, especDaPeca, movelTampo, type EspecMaterial, type Movel, type Peca, type Tampo } from "../orcamento";
+import { arestasOrla, especDaPeca, movelTampo, SUB_CORPO, type EspecMaterial, type Movel, type Peca, type Tampo } from "../orcamento";
 import { deslocar, furacao, juntar, legendaFuros, limites, rect, vistaPeca, type Entidade } from "./geometria";
-import { puxadorDe, frentesDoMovel, iso, type Painel } from "./modelo3d";
+import { alturaPes, modelo3d, puxadorDe, frentesDoMovel, iso, type Painel } from "./modelo3d";
 import {
   alcadoConjunto,
   alvosConjunto,
@@ -111,9 +111,11 @@ export async function pdfMovel(mod: Modelos, m: Movel, ctx: Contexto) {
   const linhas: Parameters<typeof listaMaterial>[2] = [];
   let ref = 1;
   const subs = [...new Set(m.pecas.map((p) => p.subconjunto).filter(Boolean))];
+  const refSub: Record<string, string> = {}; // peças de um sub-conjunto apontam para o nº do sub-conjunto
   for (const sub of subs) {
     const ps = m.pecas.filter((p) => p.subconjunto === sub);
-    linhas.push({ qtd: "1", designacao: `${sub} (pré-montagem)`, codigo: ps[0]?.codigo_sub ?? "", material: "", ref: String(ref++), peso: kg(ps.reduce((a, p) => a + pesoPeca(p), 0)) });
+    for (const p of ps) if (p.codigo) refSub[p.codigo] = String(ref);
+    linhas.push({ qtd: "1", designacao: sub === SUB_CORPO ? "Corpo (pré-montagem)" : `${sub} (pré-montagem)`, codigo: ps[0]?.codigo_sub ?? "", material: sub === SUB_CORPO ? descMaterial(m.corpo, 19) : "", ref: String(ref++), peso: kg(ps.reduce((a, p) => a + pesoPeca(p), 0)) });
   }
   for (const p of m.pecas.filter((x) => !x.subconjunto)) {
     linhas.push({ qtd: String(p.qtd), designacao: `${p.designacao} ${p.c}x${p.l}x${p.e}mm`, codigo: p.codigo ?? "", material: descMaterial(especDaPeca(m, p), p.e), ref: String(ref++), peso: kg(pesoPeca(p)) });
@@ -123,11 +125,13 @@ export async function pdfMovel(mod: Modelos, m: Movel, ctx: Contexto) {
   }
   const topoLista = listaMaterial(pg, r, linhas);
   // perspectiva com balões (nº de referência da lista)
-  const numeros: Record<string, string> = {};
+  const numeros: Record<string, string> = { ...refSub };
   linhas.forEach((l) => { if (l.codigo && !numeros[l.codigo]) numeros[l.codigo] = l.ref; });
   const pm = paineisMundo(m);
   const livre = ZONA.YT - 45 - topoLista;
-  if (livre > 110) desenharVista(pg, r, baloes(vistaIso(pm), alvosIso(pm, numeros)), { x: ZONA.XR + 10, y: topoLista + 8, w: ZONA.X1 - ZONA.XR - 20, h: livre - 10 });
+  // um balão por nº (as peças de um sub-conjunto partilham o nº do sub-conjunto)
+  const alvos = alvosIso(pm, numeros).filter((a, i, arr) => arr.findIndex((b) => b.n === a.n) === i);
+  if (livre > 110) desenharVista(pg, r, baloes(vistaIso(pm), alvos), { x: ZONA.XR + 10, y: topoLista + 8, w: ZONA.X1 - ZONA.XR - 20, h: livre - 10 });
   caixasProcesso(pg, r, ZONA.X1 - 160, ZONA.YT - 30, ["10"]);
   const pesoTotal = m.pecas.reduce((a, p) => a + pesoPeca(p), 0);
   legenda(pg, r, {
@@ -228,8 +232,17 @@ function paineisGaveta(m: Movel, sub: string): Painel[] {
   return out;
 }
 
+/** Painéis do corpo (pré-montagem 13.4): ilhargas, fundo, cúpula/travessas, costa e divisória, sem pés. */
+function paineisCorpo(m: Movel): Painel[] {
+  const y0 = alturaPes(m);
+  return modelo3d(m)
+    .filter((p) => p.tipo === "corpo" || p.tipo === "costa" || p.nome === "Divisória")
+    .map((p) => ({ ...p, y: p.y - y0 }));
+}
+
 export async function pdfSubconjunto(mod: Modelos, m: Movel, sub: string, ctx: Contexto) {
-  const ps = paineisGaveta(m, sub);
+  const corpo = sub === SUB_CORPO;
+  const ps = corpo ? paineisCorpo(m) : paineisGaveta(m, sub);
   const pecas = m.pecas.filter((p) => p.subconjunto === sub);
   const ferragens = m.ferragens.filter((f) => f.subconjunto === sub);
   const r = await criarRecursos(mod);
@@ -240,6 +253,14 @@ export async function pdfSubconjunto(mod: Modelos, m: Movel, sub: string, ctx: C
   // vistas: frente, lado (frente à direita) e topo (frente em baixo)
   const fe: Entidade[] = [], le: Entidade[] = [], te: Entidade[] = [];
   for (const p of ps) {
+    if (corpo) {
+      // corpo visto de frente (aberto): costa e divisória a tracejado
+      const oculta = p.tipo === "costa" || p.nome === "Divisória";
+      fe.push(...rect(p.x, p.y, p.w, p.h, { tracejado: oculta, fina: oculta }));
+      le.push(...rect(D - (p.z + p.d), p.y, p.d, p.h, { tracejado: p.nome !== "Lado esquerdo", fina: p.nome !== "Lado esquerdo" }));
+      te.push(...rect(p.x, p.z - z0, p.w, p.d, { tracejado: p.tipo === "costa" || p.nome === "Fundo", fina: p.tipo === "costa" || p.nome === "Fundo" }));
+      continue;
+    }
     const atras = p.tipo !== "frente" && p.tipo !== "puxador";
     fe.push(...rect(p.x, p.y, p.w, p.h, { tracejado: atras, fina: atras }));
     le.push(...rect(D - (p.z + p.d), p.y, p.d, p.h, { tracejado: p.tipo === "gaveta" && !p.nome.startsWith("Lateral"), fina: p.tipo !== "frente" }));
@@ -273,7 +294,7 @@ export async function pdfSubconjunto(mod: Modelos, m: Movel, sub: string, ctx: C
     const n = numeros[p.ref ?? ""];
     if (!n || vistos.has(p.ref!)) continue;
     vistos.add(p.ref!);
-    const [x, y] = p.tipo === "frente" ? iso(p.x + p.w / 2, p.y + p.h * 0.7, p.z) : iso(p.x + p.w / 2, p.y + p.h, p.z + p.d / 2);
+    const [x, y] = p.tipo === "frente" ? iso(p.x + p.w / 2, p.y + p.h * 0.7, p.z) : corpo && p.w < p.h ? iso(p.x + p.w, p.y + p.h * 0.6, p.z + p.d * 0.3) : iso(p.x + p.w / 2, p.y + p.h, p.z + p.d / 2);
     alvos.push({ n, x, y });
   }
   const livre = ZONA.YT - 45 - topoLista;
@@ -282,13 +303,13 @@ export async function pdfSubconjunto(mod: Modelos, m: Movel, sub: string, ctx: C
   const codigo = pecas.find((p) => p.codigo_sub)?.codigo_sub ?? `${sub} ${m.ref}`;
   legenda(pg, r, {
     codigo,
-    designacao: `${sub} - ${m.designacao}`.toUpperCase(),
+    designacao: `${corpo ? "Corpo" : sub} - ${m.designacao}`.toUpperCase(),
     subtitulo: `${Math.round(W)}x${Math.round(D - z0)}x${Math.round(H)}mm`,
     destino: "PRÉ-MONTAGEM",
     escala: `1:${s}`,
     material: kg(pecas.reduce((a, p) => a + pesoPeca(p), 0)),
-    codigoMaterial: descMaterial(m.frente, 19),
-    acabamento: m.frente.acabamento,
+    codigoMaterial: descMaterial(corpo ? m.corpo : m.frente, 19),
+    acabamento: corpo ? m.corpo.acabamento : m.frente.acabamento,
     desenhou: ctx.desenhou,
     data: ctx.data,
     processo: ctx.processo,

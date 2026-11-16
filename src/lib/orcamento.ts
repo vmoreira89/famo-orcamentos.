@@ -131,6 +131,9 @@ export type Peca = {
 
 export type LinhaFerragem = { id: string; ref_famo: string | null; descricao: string; qtd: number; preco: number | null; unidade?: string; subconjunto?: string };
 
+/** Sub-conjunto do corpo do móvel (13.4): ilhargas, fundo, cúpula/travessas, costa e divisórias. */
+export const SUB_CORPO = "Corpo";
+
 /** Comprimento da corrediça: o maior standard que cabe na profundidade útil. */
 export function comprimentoCorredica(P: number, costa: number) {
   const util = P - costa - 10;
@@ -539,22 +542,22 @@ export function decompor(m: Movel, cat: Catalogo, escalao: Escalao = "placa"): M
   const pecas: Peca[] = [];
   const ehAberto = m.tipo === "estante";
   // por defeito o tampo (cúpula) e as travessas ficam por dentro das ilhargas; por cima, as ilhargas encurtam 19 mm
-  pecas.push(peca({ designacao: "Lado esquerdo", c: sobre ? A - e : A, l: P }));
-  pecas.push(peca({ designacao: "Lado direito", c: sobre ? A - e : A, l: P }));
-  pecas.push(peca({ designacao: "Fundo", c: interior, l: P }));
+  pecas.push(peca({ designacao: "Lado esquerdo", c: sobre ? A - e : A, l: P, subconjunto: SUB_CORPO }));
+  pecas.push(peca({ designacao: "Lado direito", c: sobre ? A - e : A, l: P, subconjunto: SUB_CORPO }));
+  pecas.push(peca({ designacao: "Fundo", c: interior, l: P, subconjunto: SUB_CORPO }));
   if (m.tipo === "inferior" || m.tipo === "gaveteiro") {
-    pecas.push(peca({ designacao: "Travessa superior", qtd: 2, c: sobre ? L : interior, l: 100, nota: sobre ? "Por cima das ilhargas" : "" }));
+    pecas.push(peca({ designacao: "Travessa superior", qtd: 2, c: sobre ? L : interior, l: 100, nota: sobre ? "Por cima das ilhargas" : "", subconjunto: SUB_CORPO }));
   } else {
-    pecas.push(peca({ designacao: "Cúpula", c: sobre ? L : interior, l: P, nota: sobre ? "Por cima das ilhargas" : "" }));
+    pecas.push(peca({ designacao: "Cúpula", c: sobre ? L : interior, l: P, nota: sobre ? "Por cima das ilhargas" : "", subconjunto: SUB_CORPO }));
   }
   if (!ehAberto || m.costa_e > 0) {
-    pecas.push(peca({ designacao: "Costa", c: interior + 16, l: A - 2 * e + 16, e: m.costa_e, sup: "costa" }));
+    pecas.push(peca({ designacao: "Costa", c: interior + 16, l: A - 2 * e + 16, e: m.costa_e, sup: "costa", subconjunto: SUB_CORPO }));
   }
   if (m.prateleiras > 0) {
     pecas.push(peca({ designacao: "Prateleira", qtd: m.prateleiras, c: interior - 2, l: P - 20 - m.costa_e }));
   }
   if (m.tipo === "roupeiro") {
-    pecas.push(peca({ designacao: "Divisória vertical", c: A - 2 * e, l: P - 20 - m.costa_e }));
+    pecas.push(peca({ designacao: "Divisória vertical", c: A - 2 * e, l: P - 20 - m.costa_e, subconjunto: SUB_CORPO }));
   }
 
   // Frentes: gavetas e portas
@@ -650,9 +653,10 @@ export function decompor(m: Movel, cat: Catalogo, escalao: Escalao = "placa"): M
   }
   puxador(m.portas);
   if (m.prateleiras > 0) fs.push(ferr(cat, "03.2.187.01", m.prateleiras * 4));
-  fs.push(ferr(cat, null, 4, "Minifix completo (genérico de orçamento)"));
-  fs.push(ferr(cat, "03.1.912.01", 8));
-  fs.push(ferr(cat, "04.2.020", 4));
+  // ferragens de montagem do corpo ficam no sub-conjunto do corpo
+  fs.push({ ...ferr(cat, null, 4, "Minifix completo (genérico de orçamento)"), subconjunto: SUB_CORPO });
+  fs.push({ ...ferr(cat, "03.1.912.01", 8), subconjunto: SUB_CORPO });
+  fs.push({ ...ferr(cat, "04.2.020", 4), subconjunto: SUB_CORPO });
   if (TIPOS_MOVEL[m.tipo].pes && (rod === "inox" || rod === "inox_pintar")) {
     fs.push({ ...ferr(cat, null, Math.round(L) / 1000, rod === "inox" ? "Rodapé inox" : "Rodapé inox (para pintar)"), unidade: "ml" });
   }
@@ -755,7 +759,8 @@ export function codigos(numeroProjecto: string | null, divisoes: Divisao[], move
       if (x.id === m.id) break;
       seq += x.pecas.length;
     }
-    const marcenaria = m.frente.material === "folheado" || m.frente.material === "madeira" ? "33.4" : "13.4";
+    // 33.4 quando é madeira/folheado montado em marcenaria (corpo: material do corpo; gavetas: das frentes)
+    const marc = (e: EspecMaterial) => (e.material === "folheado" || e.material === "madeira" ? "33.4" : "13.4");
     const subs = [...new Set(m.pecas.map((p) => p.subconjunto).filter(Boolean))];
     return {
       ...m,
@@ -766,7 +771,7 @@ export function codigos(numeroProjecto: string | null, divisoes: Divisao[], move
         subconjunto: p.subconjunto,
         nota: p.nota,
         // código do sub-conjunto a que pertence
-        ...(p.subconjunto ? { codigo_sub: `${marcenaria}.${subs.indexOf(p.subconjunto) + 1}${m.ref}${suf}` } : {}),
+        ...(p.subconjunto ? { codigo_sub: `${marc(p.subconjunto === SUB_CORPO ? m.corpo : m.frente)}.${subs.indexOf(p.subconjunto) + 1}${m.ref}${suf}` } : {}),
       })),
     };
   });
