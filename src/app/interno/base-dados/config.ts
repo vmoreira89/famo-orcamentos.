@@ -1,4 +1,4 @@
-export type TipoCampo = "texto" | "textarea" | "numero" | "bool" | "opcoes" | "fk" | "imagem" | "cor";
+export type TipoCampo = "texto" | "textarea" | "numero" | "bool" | "opcoes" | "fk" | "imagem" | "cor" | "link";
 
 export type Campo = {
   k: string;
@@ -191,7 +191,8 @@ export const TABELAS: ConfigTabela[] = [
       { k: "ref_fornecedor", l: "Ref. fornecedor", tipo: "texto", lista: true },
       { k: "unidade", l: "Unidade", tipo: "opcoes", opcoes: UNIDADES, obrigatorio: true },
       { k: "preco", l: "Preço", tipo: "numero", sufixo: "€", lista: true },
-      { k: "cad_url", l: "Link CAD (DXF/STEP)", tipo: "texto" },
+      { k: "url", l: "Página do produto", tipo: "link", lista: true },
+      { k: "cad_url", l: "Link CAD (DXF/STEP)", tipo: "link" },
       notas,
       ativo,
     ],
