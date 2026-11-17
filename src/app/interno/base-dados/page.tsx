@@ -73,6 +73,12 @@ function formatar(c: Campo, v: unknown, fks: Record<string, Record<string, strin
   if (c.tipo === "bool") return v ? "Sim" : <span className="text-slate-400">Não</span>;
   if (c.tipo === "opcoes") return c.opcoes?.find((o) => o.v === v)?.l ?? String(v);
   if (c.tipo === "fk") return fks[c.k]?.[String(v)] ?? "—";
+  if (c.tipo === "link")
+    return (
+      <a href={String(v)} target="_blank" rel="noopener noreferrer" className="text-marca hover:underline" onClick={(e) => e.stopPropagation()}>
+        Abrir ↗
+      </a>
+    );
   if (c.tipo === "imagem") return <img src={String(v)} alt="" className="h-8 w-8 rounded border border-slate-300 object-cover" />;
   if (c.tipo === "cor") return <span className="inline-flex items-center gap-1.5"><span className="inline-block h-4 w-4 rounded border border-slate-300" style={{ backgroundColor: String(v) }} />{String(v)}</span>;
   if (c.tipo === "numero") {
