@@ -11,10 +11,20 @@ import TabelaFiltravel, { type Coluna } from "@/components/TabelaFiltravel";
 
 type Linha = Record<string, unknown> & { id: string };
 
+/** Separadores de topo: tabelas com o mesmo `grupo` ficam juntas, com sub-separadores. */
+const SEPARADORES = TABELAS.reduce<{ nome: string; ids: string[] }[]>((acc, t) => {
+  const nome = t.grupo ?? t.nome;
+  const s = acc.find((x) => x.nome === nome);
+  if (s) s.ids.push(t.id);
+  else acc.push({ nome, ids: [t.id] });
+  return acc;
+}, []);
+
 export default function BaseDados() {
   const perfil = usePerfil();
   const [activa, setActiva] = useState(TABELAS[0].id);
   const config = TABELAS.find((t) => t.id === activa)!;
+  const sep = SEPARADORES.find((s) => s.ids.includes(activa))!;
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-8">
@@ -25,18 +35,34 @@ export default function BaseDados() {
           : "Só consulta. As alterações são feitas pela administração ou pelo orçamentista chefe."}
       </p>
       <div className="mt-6 flex flex-wrap gap-2">
-        {TABELAS.map((t) => (
+        {SEPARADORES.map((s) => (
           <button
-            key={t.id}
-            onClick={() => setActiva(t.id)}
+            key={s.nome}
+            onClick={() => setActiva(s.ids[0])}
             className={`rounded-full px-3 py-1 text-sm font-medium ${
-              activa === t.id ? "bg-marca text-white" : "bg-white text-slate-700 ring-1 ring-slate-300 hover:ring-slate-400"
+              s === sep ? "bg-marca text-white" : "bg-white text-slate-700 ring-1 ring-slate-300 hover:ring-slate-400"
             }`}
           >
-            {t.nome}
+            {s.nome}
           </button>
         ))}
       </div>
+      {sep.ids.length > 1 && (
+        <div className="mt-3 flex flex-wrap gap-1 border-b border-slate-200">
+          {sep.ids.map((id) => {
+            const t = TABELAS.find((x) => x.id === id)!;
+            return (
+              <button
+                key={id}
+                onClick={() => setActiva(id)}
+                className={`-mb-px border-b-2 px-3 py-1.5 text-sm font-medium ${activa === id ? "border-marca text-marca" : "border-transparent text-slate-600 hover:text-slate-900"}`}
+              >
+                {t.subnome ?? t.nome}
+              </button>
+            );
+          })}
+        </div>
+      )}
       <TabelaBD key={config.id} config={config} podeEditar={eGestao(perfil.nivel)} />
     </div>
   );
@@ -75,7 +101,8 @@ function TabelaBD({ config, podeEditar }: { config: ConfigTabela; podeEditar: bo
     if (termo) q = q.or(config.pesquisa.map((c) => `${c}.ilike.%${termo}%`).join(","));
     for (const o of config.ordem) q = q.order(o.col, { ascending: o.asc ?? true, nullsFirst: false });
     const { data } = await q;
-    setLinhas((data as Linha[]) ?? []);
+    const ls = (data as Linha[]) ?? [];
+    setLinhas(config.ordenar ? [...ls].sort(config.ordenar) : ls);
     setACarregar(false);
   }, [config, pesquisa, limite]);
 

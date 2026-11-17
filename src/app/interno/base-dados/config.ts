@@ -20,7 +20,15 @@ export type ConfigTabela = {
   ordem: { col: string; asc?: boolean }[];
   pesquisa: string[];
   limite?: number;
+  /** ordenação final no ecrã (depois da leitura), quando a da base de dados não chega */
+  ordenar?: (a: Record<string, unknown>, b: Record<string, unknown>) => number;
+  /** separadores agrupados: tabelas com o mesmo grupo aparecem como sub-separadores */
+  grupo?: string;
+  subnome?: string;
 };
+
+const RANK_TIPO: Record<string, number> = { placa: 0, orla: 1, orla_laser: 2 };
+const largura = (m: unknown) => parseFloat(String(m ?? "").split(/x/i)[0]) || 0;
 
 const CATEGORIAS = [
   ["mdf", "MDF"],
@@ -55,6 +63,8 @@ export const TABELAS: ConfigTabela[] = [
   {
     id: "materias_primas",
     nome: "Matérias-primas",
+    grupo: "Matérias-primas",
+    subnome: "Gerais (MDF, aglomerado, folhas…)",
     descricao: "Placas, MDF, aglomerado, folhas de madeira, orlas… Preço por unidade de medida (normalmente €/m²).",
     ordem: [{ col: "categoria" }, { col: "espessura_mm" }],
     pesquisa: ["descricao", "codigo_famo", "ref_fornecedor"],
@@ -74,23 +84,16 @@ export const TABELAS: ConfigTabela[] = [
     ],
   },
   {
-    id: "grupos_laminado",
-    nome: "Grupos de laminado",
-    descricao: "Cada acabamento laminado pertence a um grupo; o grupo define o preço por m² (ver Preços por grupo).",
-    ordem: [{ col: "codigo" }],
-    pesquisa: ["codigo", "descricao"],
-    campos: [
-      { k: "codigo", l: "Grupo", tipo: "texto", obrigatorio: true, lista: true },
-      { k: "descricao", l: "Descrição", tipo: "texto", lista: true },
-      notas,
-      ativo,
-    ],
-  },
-  {
     id: "precos_grupo_laminado",
     nome: "Preços laminados",
+    grupo: "Matérias-primas",
+    subnome: "Laminados (placas e orlas)",
     descricao: "Preço das placas laminadas por m² à placa, à palete e ao camião (o orçamento usa à placa, salvo escolha no fim do orçamento), e das orlas por metro linear. Os preços por referência (decor) sobrepõem-se aos da tabela base.",
-    ordem: [{ col: "grupo_id" }, { col: "tipo" }, { col: "espessura_mm" }],
+    ordem: [{ col: "tipo" }, { col: "espessura_mm" }, { col: "medida" }],
+    // placas por espessura; depois orlas e orlas laser, cada uma por largura
+    ordenar: (a, b) =>
+      (RANK_TIPO[String(a.tipo)] ?? 9) - (RANK_TIPO[String(b.tipo)] ?? 9) ||
+      (a.tipo === "placa" ? Number(a.espessura_mm) - Number(b.espessura_mm) : largura(a.medida) - largura(b.medida) || Number(a.espessura_mm) - Number(b.espessura_mm)),
     pesquisa: ["notas", "medida", "tipo"],
     campos: [
       { k: "grupo_id", l: "Grupo", tipo: "fk", fk: { tabela: "grupos_laminado", rotulo: "codigo" }, obrigatorio: true, lista: true },
@@ -176,20 +179,6 @@ export const TABELAS: ConfigTabela[] = [
       { k: "website", l: "Website", tipo: "texto" },
       notas,
       ativo,
-    ],
-  },
-  {
-    id: "escaloes_desconto",
-    nome: "Descontos",
-    descricao: "Escalões de desconto por fornecedor.",
-    ordem: [{ col: "fornecedor_id" }, { col: "desconto_pct" }],
-    pesquisa: ["descricao"],
-    campos: [
-      { ...fornecedor },
-      { k: "descricao", l: "Escalão", tipo: "texto", obrigatorio: true, lista: true },
-      { k: "qtd_min", l: "Qtd. mínima", tipo: "numero", lista: true },
-      { k: "qtd_max", l: "Qtd. máxima", tipo: "numero", lista: true },
-      { k: "desconto_pct", l: "Desconto", tipo: "numero", sufixo: "%", obrigatorio: true, lista: true },
     ],
   },
   {
