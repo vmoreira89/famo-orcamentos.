@@ -96,7 +96,8 @@ function TabelaBD({ config, podeEditar }: { config: ConfigTabela; podeEditar: bo
   const carregar = useCallback(async () => {
     setACarregar(true);
     const sb = supabase();
-    let q = sb.from(config.id).select("*").limit(limite);
+    let q = sb.from(config.tabela ?? config.id).select("*").limit(limite);
+    for (const [col, v] of Object.entries(config.filtro ?? {})) q = Array.isArray(v) ? q.in(col, v) : q.eq(col, v);
     const termo = pesquisa.trim().replace(/[%,()]/g, " ");
     if (termo) q = q.or(config.pesquisa.map((c) => `${c}.ilike.%${termo}%`).join(","));
     for (const o of config.ordem) q = q.order(o.col, { ascending: o.asc ?? true, nullsFirst: false });
@@ -134,12 +135,13 @@ function TabelaBD({ config, podeEditar }: { config: ConfigTabela; podeEditar: bo
       else if (c.k === "unidade") base[c.k] = config.id === "ferragens" ? "un" : "m2";
       else base[c.k] = null;
     }
+    Object.assign(base, config.novo ?? {});
     setHistorico(null);
     setEdicao(base);
   }
 
   async function verHistorico(id: string) {
-    const { data } = await supabase().rpc("historico_registo", { p_tabela: config.id, p_id: id });
+    const { data } = await supabase().rpc("historico_registo", { p_tabela: config.tabela ?? config.id, p_id: id });
     setHistorico((data as { quando: string; accao: string; quem: string; motivo: string | null }[]) ?? []);
   }
 
@@ -205,10 +207,11 @@ function TabelaBD({ config, podeEditar }: { config: ConfigTabela; podeEditar: bo
           onFechar={() => setEdicao(null)}
           onConfirmar={async (motivo) => {
             if (!edicao) return null;
-            const dados: Record<string, unknown> = {};
+            let dados: Record<string, unknown> = { ...(config.novo ?? {}) };
             for (const c of config.campos) dados[c.k] = edicao[c.k] === "" ? null : edicao[c.k];
+            if (config.aoGuardar) dados = config.aoGuardar(dados);
             const { error } = await supabase().rpc("guardar_bd", {
-              p_tabela: config.id,
+              p_tabela: config.tabela ?? config.id,
               p_id: edicao.id || null,
               p_dados: dados,
               p_motivo: motivo,
@@ -244,7 +247,7 @@ function TabelaBD({ config, podeEditar }: { config: ConfigTabela; podeEditar: bo
         textoConfirmar="Apagar"
         onFechar={() => setApagar(null)}
         onConfirmar={async (motivo) => {
-          const { error } = await supabase().rpc("apagar_bd", { p_tabela: config.id, p_id: apagar!.id, p_motivo: motivo });
+          const { error } = await supabase().rpc("apagar_bd", { p_tabela: config.tabela ?? config.id, p_id: apagar!.id, p_motivo: motivo });
           if (error) return error.message;
           await carregar();
           return null;

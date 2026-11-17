@@ -25,6 +25,14 @@ export type ConfigTabela = {
   /** separadores agrupados: tabelas com o mesmo grupo aparecem como sub-separadores */
   grupo?: string;
   subnome?: string;
+  /** tabela na base de dados, quando é diferente do id (várias vistas da mesma tabela) */
+  tabela?: string;
+  /** filtro fixo desta vista (coluna = valor ou lista de valores) */
+  filtro?: Record<string, string | string[]>;
+  /** valores fixos dos registos novos desta vista */
+  novo?: Record<string, unknown>;
+  /** ajuste dos dados antes de gravar */
+  aoGuardar?: (d: Record<string, unknown>) => Record<string, unknown>;
 };
 
 const RANK_TIPO: Record<string, number> = { placa: 0, orla: 1, orla_laser: 2 };
@@ -84,18 +92,56 @@ export const TABELAS: ConfigTabela[] = [
     ],
   },
   {
-    id: "precos_grupo_laminado",
-    nome: "Preços laminados",
+    id: "precos_placas",
+    tabela: "precos_grupo_laminado",
+    filtro: { tipo: "placa" },
+    novo: { tipo: "placa" },
+    nome: "Laminados: placas",
     grupo: "Matérias-primas",
-    subnome: "Laminados (placas e orlas)",
-    descricao: "Preço das placas laminadas por m² à placa, à palete e ao camião (o orçamento usa à placa, salvo escolha no fim do orçamento), e das orlas por metro linear. Os preços por referência (decor) sobrepõem-se aos da tabela base.",
-    ordem: [{ col: "tipo" }, { col: "espessura_mm" }, { col: "medida" }],
-    // placas por espessura; depois orlas e orlas laser, cada uma por largura
-    ordenar: (a, b) =>
-      (RANK_TIPO[String(a.tipo)] ?? 9) - (RANK_TIPO[String(b.tipo)] ?? 9) ||
-      (a.tipo === "placa" ? Number(a.espessura_mm) - Number(b.espessura_mm) : largura(a.medida) - largura(b.medida) || Number(a.espessura_mm) - Number(b.espessura_mm)),
-    pesquisa: ["notas", "medida", "tipo"],
+    subnome: "Laminados: placas (€/m²)",
+    descricao: "Preço das placas laminadas por referência e espessura, em €/m²: à placa (base das contas), à palete e ao camião (escolha no fim do orçamento).",
+    ordem: [{ col: "espessura_mm" }],
+    ordenar: (a, b) => Number(a.espessura_mm) - Number(b.espessura_mm),
+    pesquisa: ["notas"],
     campos: [
+      {
+        k: "acabamento_id",
+        l: "Referência (decor)",
+        tipo: "fk",
+        fk: { tabela: "acabamentos", rotulo: "referencia", ou: "tipo.ilike.lam%,tipo.ilike.termolam%" },
+        lista: true,
+        obrigatorio: true,
+      },
+      { k: "espessura_mm", l: "Espessura", tipo: "numero", sufixo: "mm", obrigatorio: true, lista: true },
+      { k: "preco_m2", l: "Preço m² placa", tipo: "numero", sufixo: "€/m²", lista: true, ajuda: "Base das contas do orçamento." },
+      { k: "preco_m2_palete", l: "Preço m² palete", tipo: "numero", sufixo: "€/m²", lista: true, ajuda: "Vazio = usa o preço à placa." },
+      { k: "preco_m2_camiao", l: "Preço m² camião", tipo: "numero", sufixo: "€/m²", lista: true, ajuda: "Vazio = usa o preço à placa." },
+      { k: "notas", l: "Notas", tipo: "texto", lista: true },
+    ],
+  },
+  {
+    id: "precos_orlas",
+    tabela: "precos_grupo_laminado",
+    filtro: { tipo: ["orla", "orla_laser"] },
+    novo: { tipo: "orla" },
+    nome: "Laminados: orlas",
+    grupo: "Matérias-primas",
+    subnome: "Laminados: orlas (€/ml)",
+    descricao: "Preço das orlas por referência e medida (largura x espessura), em € por metro linear.",
+    ordem: [{ col: "tipo" }, { col: "medida" }],
+    ordenar: (a, b) => (RANK_TIPO[String(a.tipo)] ?? 9) - (RANK_TIPO[String(b.tipo)] ?? 9) || largura(a.medida) - largura(b.medida) || Number(a.espessura_mm) - Number(b.espessura_mm),
+    pesquisa: ["notas", "medida"],
+    // a espessura da orla tira-se da medida (ex.: 23x2 → 2 mm)
+    aoGuardar: (d) => ({ ...d, espessura_mm: parseFloat(String(d.medida ?? "").split(/x/i)[1]?.replace(",", ".") ?? "") || d.espessura_mm || 2 }),
+    campos: [
+      {
+        k: "acabamento_id",
+        l: "Referência (decor)",
+        tipo: "fk",
+        fk: { tabela: "acabamentos", rotulo: "referencia", ou: "tipo.ilike.lam%,tipo.ilike.termolam%" },
+        lista: true,
+        obrigatorio: true,
+      },
       {
         k: "tipo",
         l: "Tipo",
@@ -103,25 +149,12 @@ export const TABELAS: ConfigTabela[] = [
         obrigatorio: true,
         lista: true,
         opcoes: [
-          { v: "placa", l: "Placa (€/m²)" },
-          { v: "orla", l: "Orla (€/ml)" },
-          { v: "orla_laser", l: "Orla laser (€/ml)" },
+          { v: "orla", l: "Orla" },
+          { v: "orla_laser", l: "Orla laser" },
         ],
       },
-      { k: "espessura_mm", l: "Espessura", tipo: "numero", sufixo: "mm", obrigatorio: true, lista: true },
-      { k: "medida", l: "Medida da orla", tipo: "texto", lista: true, ajuda: "Só para orlas, ex.: 23x2" },
-      {
-        k: "acabamento_id",
-        l: "Decor específico",
-        tipo: "fk",
-        fk: { tabela: "acabamentos", rotulo: "referencia", ou: "tipo.ilike.lam%,tipo.ilike.termolam%" },
-        lista: true,
-        obrigatorio: true,
-        ajuda: "Referência do laminado (decor) a que se aplica o preço.",
-      },
-      { k: "preco_m2", l: "Preço m² placa", tipo: "numero", sufixo: "€", lista: true, ajuda: "Placas: €/m² à placa (base das contas). Orlas: €/ml." },
-      { k: "preco_m2_palete", l: "Preço m² palete", tipo: "numero", sufixo: "€", lista: true, ajuda: "Só placas. Vazio = usa o preço à placa." },
-      { k: "preco_m2_camiao", l: "Preço m² camião", tipo: "numero", sufixo: "€", lista: true, ajuda: "Só placas. Vazio = usa o preço à placa." },
+      { k: "medida", l: "Medida", tipo: "texto", obrigatorio: true, lista: true, ajuda: "Largura x espessura em mm, ex.: 23x2" },
+      { k: "preco_m2", l: "Preço", tipo: "numero", sufixo: "€/ml", lista: true },
       { k: "notas", l: "Notas", tipo: "texto", lista: true },
     ],
   },
