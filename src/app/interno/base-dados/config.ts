@@ -6,7 +6,7 @@ export type Campo = {
   tipo: TipoCampo;
   obrigatorio?: boolean;
   opcoes?: { v: string; l: string }[];
-  fk?: { tabela: string; rotulo: string; soComValor?: string };
+  fk?: { tabela: string; rotulo: string; ou?: string }; // ou: filtro PostgREST (or) para a lista de opções
   lista?: boolean; // mostrar na tabela
   ajuda?: string;
   sufixo?: string;
@@ -96,7 +96,6 @@ export const TABELAS: ConfigTabela[] = [
       (a.tipo === "placa" ? Number(a.espessura_mm) - Number(b.espessura_mm) : largura(a.medida) - largura(b.medida) || Number(a.espessura_mm) - Number(b.espessura_mm)),
     pesquisa: ["notas", "medida", "tipo"],
     campos: [
-      { k: "grupo_id", l: "Grupo", tipo: "fk", fk: { tabela: "grupos_laminado", rotulo: "codigo" }, obrigatorio: true, lista: true },
       {
         k: "tipo",
         l: "Tipo",
@@ -115,9 +114,10 @@ export const TABELAS: ConfigTabela[] = [
         k: "acabamento_id",
         l: "Decor específico",
         tipo: "fk",
-        fk: { tabela: "acabamentos", rotulo: "referencia", soComValor: "grupo_id" },
+        fk: { tabela: "acabamentos", rotulo: "referencia", ou: "tipo.ilike.lam%,tipo.ilike.termolam%" },
         lista: true,
-        ajuda: "Vazio = preço do grupo. Preenchido = preço só desse decor (sobrepõe-se ao do grupo).",
+        obrigatorio: true,
+        ajuda: "Referência do laminado (decor) a que se aplica o preço.",
       },
       { k: "preco_m2", l: "Preço m² placa", tipo: "numero", sufixo: "€", lista: true, ajuda: "Placas: €/m² à placa (base das contas). Orlas: €/ml." },
       { k: "preco_m2_palete", l: "Preço m² palete", tipo: "numero", sufixo: "€", lista: true, ajuda: "Só placas. Vazio = usa o preço à placa." },
@@ -138,7 +138,6 @@ export const TABELAS: ConfigTabela[] = [
       { k: "descricao", l: "Descrição", tipo: "texto", lista: true },
       { k: "tipo", l: "Tipo", tipo: "texto", lista: true },
       { k: "categoria", l: "Categoria", tipo: "texto" },
-      { k: "grupo_id", l: "Grupo de laminado", tipo: "fk", fk: { tabela: "grupos_laminado", rotulo: "codigo" }, lista: true },
       { k: "amostra", l: "Amostra", tipo: "imagem", lista: true, ajuda: "Imagem do decor (é reduzida para 256 px). Usada no orçamento e para pintar as perspectivas dos desenhos." },
       { k: "cor", l: "Cor aproximada", tipo: "cor", lista: true, ajuda: "Usada nos desenhos quando não há amostra (ex.: lacados)." },
       { k: "observacoes", l: "Observações", tipo: "textarea" },

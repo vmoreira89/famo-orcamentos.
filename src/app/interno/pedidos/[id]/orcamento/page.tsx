@@ -87,14 +87,13 @@ export default function EditorOrcamento() {
 
   const carregar = useCallback(async () => {
     const sb = supabase();
-    const [p, d, o, pm, c, ac, gl, fi, ra] = await Promise.all([
+    const [p, d, o, pm, c, ac, fi, ra] = await Promise.all([
       sb.from("pedidos").select("*").eq("id", id).single(),
       sb.from("pedido_divisoes").select("*").eq("pedido_id", id).order("ordem"),
       sb.from("orcamentos").select("versao,dados,parametros,margem_pct").eq("pedido_id", id).maybeSingle(),
       sb.rpc("minhas_permissoes", { p_id: id }),
       carregarCatalogo(),
-      sb.from("acabamentos").select("referencia,descricao,grupo_id,amostra,cor").or("tipo.ilike.lam%,tipo.ilike.termolam%,grupo_id.not.is.null").eq("ativo", true).order("referencia").limit(3000),
-      sb.from("grupos_laminado").select("id,codigo"),
+      sb.from("acabamentos").select("referencia,descricao,amostra,cor").or("tipo.ilike.lam%,tipo.ilike.termolam%").eq("ativo", true).order("referencia").limit(3000),
       sb.from("pedido_ficheiros").select("divisao_id").eq("pedido_id", id),
       sb.from("orcamento_rascunhos").select("versao_base,dados,parametros,margem_pct,updated_at").eq("pedido_id", id).maybeSingle(),
     ]);
@@ -105,7 +104,6 @@ export default function EditorOrcamento() {
     const nf: Record<string, number> = {};
     for (const f of (fi.data as { divisao_id: string | null }[]) ?? []) nf[f.divisao_id ?? "geral"] = (nf[f.divisao_id ?? "geral"] ?? 0) + 1;
     setNFicheiros(nf);
-    const codGrupo = Object.fromEntries((((gl.data as { id: string; codigo: string }[]) ?? [])).map((x) => [x.id, x.codigo]));
     if (p.error) return setErro("Pedido não encontrado.");
     setPedido(p.data as Pedido);
     setDivisoes((d.data as Divisao[]) ?? []);
@@ -113,9 +111,9 @@ export default function EditorOrcamento() {
     setCat(c);
     const vistos = new Set<string>();
     setDecors(
-      ((ac.data as { referencia: string; descricao: string; grupo_id: string | null; amostra: string | null; cor: string | null }[]) ?? [])
+      ((ac.data as { referencia: string; descricao: string; amostra: string | null; cor: string | null }[]) ?? [])
         .filter((x) => x.referencia && !vistos.has(x.referencia) && vistos.add(x.referencia))
-        .map((x) => ({ referencia: x.referencia, descricao: x.descricao, grupo: x.grupo_id ? codGrupo[x.grupo_id] ?? "" : "", amostra: x.amostra, cor: x.cor })),
+        .map((x) => ({ referencia: x.referencia, descricao: x.descricao, grupo: "", amostra: x.amostra, cor: x.cor })),
     );
     const orc = o.data as LinhaOrc | null;
     if (orc) {
